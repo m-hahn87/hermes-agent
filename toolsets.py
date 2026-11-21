@@ -33,6 +33,9 @@ _HERMES_CORE_TOOLS = [
     "computer_use",
     # Service-gated connector account status and authorization links.
     "manage_connections",
+    # Conduit phone-control bridge (server-request tools): productive only when a
+    # phone-capability client (Conduit Android) is attached to the session.
+    "phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot",
 ]
 
 # Webhook payloads are untrusted third-party content: no file/system execution.
