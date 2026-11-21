@@ -156,30 +156,34 @@ def advertise(transport: Any, server_requests: bool) -> None:
 
 # Transports whose client advertised ``phone_control`` (Conduit app): the phone.* server requests
 # are pinned to these only, so a Desktop window attached to the same session can never settle a
-# phone request with a method-not-found error while the phone is still working.
-_phone_transports: set[Any] = set()
+# phone request with a method-not-found error while the phone is still working. Ordered by the last
+# advertisement: a reinstalled app reconnects while its previous process may still hold a socket, and
+# the newest advertisement is the build the user is actually looking at.
+_phone_transports: dict[Any, float] = {}
 
 
 def advertise_phone(transport: Any, phone_control: bool) -> None:
     """Record whether *transport*'s client controls the user's phone (``client.capabilities``)."""
     with _lock:
         if phone_control:
-            _phone_transports.add(transport)
+            _phone_transports[transport] = time.time()
         else:
-            _phone_transports.discard(transport)
+            _phone_transports.pop(transport, None)
 
 
 def phone_transport() -> Any | None:
-    """The one connected phone-control client (Conduit), or ``None``."""
+    """The most recently advertising phone-control client (Conduit), or ``None``."""
     with _lock:
-        return next(iter(_phone_transports), None)
+        if not _phone_transports:
+            return None
+        return max(_phone_transports.items(), key=lambda item: item[1])[0]
 
 
 def forget(transport: Any) -> None:
     """Drop a disconnected transport's advertisement."""
     with _lock:
         _answering_clients.discard(transport)
-        _phone_transports.discard(transport)
+        _phone_transports.pop(transport, None)
 
 
 def answers_requests(transport: Any) -> bool:
