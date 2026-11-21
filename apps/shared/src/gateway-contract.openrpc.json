@@ -28028,6 +28028,205 @@
         "title": "PetThumbResult",
         "type": "object"
       },
+      "PhoneActionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "observation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Observation"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          }
+        },
+        "title": "PhoneActionResult",
+        "type": "object"
+      },
+      "PhoneBackRequestParams": {
+        "additionalProperties": false,
+        "description": "``phone.back`` takes no node: a global back action.",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "PhoneBackRequestParams",
+        "type": "object"
+      },
+      "PhoneNodeRequestParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "node_index": {
+            "minimum": 0,
+            "title": "Node Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_index"
+        ],
+        "title": "PhoneNodeRequestParams",
+        "type": "object"
+      },
+      "PhoneScreenRequestParams": {
+        "additionalProperties": false,
+        "description": "``phone.screen``: the LLM-friendly node snapshot of the active screen (index-stable).",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "PhoneScreenRequestParams",
+        "type": "object"
+      },
+      "PhoneScreenResult": {
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "items": {},
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "PhoneScreenResult",
+        "type": "object"
+      },
+      "PhoneScreenshotRequestParams": {
+        "additionalProperties": false,
+        "description": "``phone.screenshot``: a downscaled JPEG data-URL; blocked secure windows answer an error.",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "PhoneScreenshotRequestParams",
+        "type": "object"
+      },
+      "PhoneScreenshotResult": {
+        "additionalProperties": false,
+        "properties": {
+          "data_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data Url"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          }
+        },
+        "title": "PhoneScreenshotResult",
+        "type": "object"
+      },
+      "PhoneSwipeRequestParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "node_index": {
+            "minimum": 0,
+            "title": "Node Index",
+            "type": "integer"
+          },
+          "delta_x": {
+            "title": "Delta X",
+            "type": "integer"
+          },
+          "delta_y": {
+            "title": "Delta Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_index",
+          "delta_x",
+          "delta_y"
+        ],
+        "title": "PhoneSwipeRequestParams",
+        "type": "object"
+      },
+      "PhoneTypeRequestParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "node_index": {
+            "minimum": 0,
+            "title": "Node Index",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_index",
+          "text"
+        ],
+        "title": "PhoneTypeRequestParams",
+        "type": "object"
+      },
       "PingParams": {
         "additionalProperties": false,
         "properties": {},
@@ -50657,6 +50856,114 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/ValueResult"
+        }
+      }
+    },
+    {
+      "name": "phone.back",
+      "summary": "Conduit phone control: global back action.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneBackRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
+        }
+      }
+    },
+    {
+      "name": "phone.screen",
+      "summary": "Conduit phone control: read the active screen as an LLM-friendly node list.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneScreenRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneScreenResult"
+        }
+      }
+    },
+    {
+      "name": "phone.screenshot",
+      "summary": "Conduit phone control: capture a downscaled screenshot as a data-URL.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneScreenshotRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneScreenshotResult"
+        }
+      }
+    },
+    {
+      "name": "phone.swipe",
+      "summary": "Conduit phone control: swipe starting at node_index by delta_x/delta_y pixels.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneSwipeRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
+        }
+      }
+    },
+    {
+      "name": "phone.tap",
+      "summary": "Conduit phone control: tap the node at node_index from the last phone.screen snapshot.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneNodeRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
+        }
+      }
+    },
+    {
+      "name": "phone.type",
+      "summary": "Conduit phone control: set the text of the editable node at node_index.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneTypeRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
         }
       }
     },

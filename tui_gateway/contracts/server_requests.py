@@ -386,3 +386,62 @@ class RequestCancelPayload(Payload):
 
 event("request.cancel", RequestCancelPayload,
       doc="The backend withdrew an open server→client request; clear the matching card only.")
+
+
+# ── phone control (Conduit Android) ───────────────────────────────────────────────────────────
+# The Conduit app answers these only when it advertised ``phone_control``; failure results carry
+# ``{error: {code}}`` (inactive | timeout | unavailable | invalid_params | session_not_open |
+# busy | screen_required | blocked_by_app | secure_window).
+
+
+class PhoneScreenRequestParams(ServerRequestParams):
+    """``phone.screen``: the LLM-friendly node snapshot of the active screen (index-stable)."""
+
+
+class PhoneScreenResult(Result):
+    nodes: list[JsonValue]
+
+
+class PhoneNodeRequestParams(ServerRequestParams):
+    node_index: int = Field(ge=0)
+
+
+class PhoneTypeRequestParams(PhoneNodeRequestParams):
+    text: str
+
+
+class PhoneSwipeRequestParams(PhoneNodeRequestParams):
+    delta_x: int
+    delta_y: int
+
+
+class PhoneBackRequestParams(ServerRequestParams):
+    """``phone.back`` takes no node: a global back action."""
+
+
+class PhoneActionResult(Result):
+    observation: str | None = None  # e.g. "clicked" | "text_set" | "scrolled"
+    error: dict[str, JsonValue] | None = None  # {code: ...} on failure
+
+
+class PhoneScreenshotRequestParams(ServerRequestParams):
+    """``phone.screenshot``: a downscaled JPEG data-URL; blocked secure windows answer an error."""
+
+
+class PhoneScreenshotResult(Result):
+    data_url: str | None = None
+    error: dict[str, JsonValue] | None = None
+
+
+server_request("phone.screen", params=PhoneScreenRequestParams, result=PhoneScreenResult,
+               doc="Conduit phone control: read the active screen as an LLM-friendly node list.")
+server_request("phone.tap", params=PhoneNodeRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: tap the node at node_index from the last phone.screen snapshot.")
+server_request("phone.type", params=PhoneTypeRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: set the text of the editable node at node_index.")
+server_request("phone.swipe", params=PhoneSwipeRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: swipe starting at node_index by delta_x/delta_y pixels.")
+server_request("phone.back", params=PhoneBackRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: global back action.")
+server_request("phone.screenshot", params=PhoneScreenshotRequestParams, result=PhoneScreenshotResult,
+               doc="Conduit phone control: capture a downscaled screenshot as a data-URL.")

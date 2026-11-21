@@ -154,10 +154,32 @@ def advertise(transport: Any, server_requests: bool) -> None:
             _answering_clients.discard(transport)
 
 
+# Transports whose client advertised ``phone_control`` (Conduit app): the phone.* server requests
+# are pinned to these only, so a Desktop window attached to the same session can never settle a
+# phone request with a method-not-found error while the phone is still working.
+_phone_transports: set[Any] = set()
+
+
+def advertise_phone(transport: Any, phone_control: bool) -> None:
+    """Record whether *transport*'s client controls the user's phone (``client.capabilities``)."""
+    with _lock:
+        if phone_control:
+            _phone_transports.add(transport)
+        else:
+            _phone_transports.discard(transport)
+
+
+def phone_transport() -> Any | None:
+    """The one connected phone-control client (Conduit), or ``None``."""
+    with _lock:
+        return next(iter(_phone_transports), None)
+
+
 def forget(transport: Any) -> None:
     """Drop a disconnected transport's advertisement."""
     with _lock:
         _answering_clients.discard(transport)
+        _phone_transports.discard(transport)
 
 
 def answers_requests(transport: Any) -> bool:
