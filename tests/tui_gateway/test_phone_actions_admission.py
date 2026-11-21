@@ -238,8 +238,9 @@ async def test_admission_executed_after_the_origin_ttl_binds_nothing(tmp_path, m
     monkeypatch.setattr(phone_control, "PHONE_ACTIONS_TIMEOUT_S", 0.05)
     try:
         await _submitted(authority, conn)
-        monkeypatch.setattr(native_turn_origin, "ORIGIN_TTL_S", 0.001)
-        await asyncio.sleep(0.02)
+        # Deterministic expiry without sleeping: any positive elapsed age already exceeds a
+        # negative TTL, so the redemption must refuse.
+        monkeypatch.setattr(native_turn_origin, "ORIGIN_TTL_S", -1.0)
         ref = SessionRef("p", _SID)
         token = session_ingress.claim_native_turn_origin(authority, ref, _claim_row(authority))
         try:
