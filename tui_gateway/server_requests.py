@@ -112,7 +112,7 @@ _open: dict[str, ServerRequest] = {}
 
 def can_replay_request(method: str, params: dict) -> bool:
     """Secure page scripts belong only to the original live request, never a resume."""
-    return not (method == "preview.act" and params.get("action") == "vault")
+    return not method.startswith("phone.") and not (method == "preview.act" and params.get("action") == "vault")
 
 # Frame sinks, bound by ``bind_sinks`` from server.py at import time (like the method_ctx split
 # modules): importing server back from here would pick a different module object under the test
@@ -135,6 +135,7 @@ NOT_SHOWN_MESSAGE = ("No Hermes Desktop window is showing this chat, so its prev
 # Client transports that sent ``client.capabilities {server_requests: true}`` (identity set: StdioTransport
 # has __slots__ and cannot be weak-referenced; ws.py forgets a peer on disconnect).
 _answering_clients: set = set()
+_phone_clients: set = set()
 
 
 def bind_sinks(write_json: Callable[[dict], Any], emit: Callable[[str, str, dict], Any],
@@ -154,10 +155,28 @@ def advertise(transport: Any, server_requests: bool) -> None:
             _answering_clients.discard(transport)
 
 
+def advertise_phone(transport: Any, enabled: bool) -> None:
+    with _lock:
+        if enabled:
+            _phone_clients.add(transport)
+        else:
+            _phone_clients.discard(transport)
+
+
+def answers_phone(transport: Any) -> bool:
+    with _lock:
+        return transport in _phone_clients
+
+
 def forget(transport: Any) -> None:
     """Drop a disconnected transport's advertisement."""
     with _lock:
         _answering_clients.discard(transport)
+        _phone_clients.discard(transport)
+        for rid, req in list(_open.items()):
+            if req.transport is transport and req.method.startswith("phone."):
+                _open.pop(rid)
+                req.event.set()
 
 
 def answers_requests(transport: Any) -> bool:
@@ -192,6 +211,9 @@ def _register(req: ServerRequest) -> None:
         # and cancellation metadata, never the secret-bearing expression.
         req.params = {}
     with _lock:
+        if req.method.startswith("phone.") and req.transport not in _phone_clients:
+            req.event.set()
+            return
         req.writing = True
         _open[req.id] = req
     try:
@@ -434,3 +456,4 @@ def reset_for_tests() -> None:
     with _lock:
         _open.clear()
         _answering_clients.clear()
+        _phone_clients.clear()

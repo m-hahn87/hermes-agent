@@ -132,6 +132,10 @@ TOOLSETS = {
     # GUI-renderer affordances, enabled per desktop-sourced SESSION by the GUI
     # gateway (tui_gateway/server.py::_load_enabled_toolsets) — never by a
     # process env var, which is blind to a desktop client on a remote backend.
+    "phone_control": _ts(
+        "Control the Android client attached to this chat",
+        ["phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot"],
+    ),
     "desktop_ui": _ts(
         "Desktop GUI affordances — in-app terminal/browser panes, pane focus, "
         "reactions, appearance (GUI sessions only)",

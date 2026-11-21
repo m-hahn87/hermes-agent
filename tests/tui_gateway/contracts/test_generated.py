@@ -82,6 +82,9 @@ def sent_server_requests() -> set[str]:
     names: set[str] = set()
     for src in (REPO / "tui_gateway").glob("*.py"):
         names.update(_LITERAL_REQUEST.findall(_read(src)))
+    from tools.phone_control_tool import PHONE_TOOL_NAMES
+
+    names.update(PHONE_TOOL_NAMES.values())
     return names
 
 
