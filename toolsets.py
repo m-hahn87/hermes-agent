@@ -171,6 +171,15 @@ TOOLSETS = {
     # Scenario-specific toolsets
     "debugging": _ts("Debugging and troubleshooting toolkit", ["terminal", "process_manage"], includes=["web", "file"]),
     "safe": _ts("Safe toolkit without terminal access", [], includes=["web", "vision", "image_gen"]),
+    # Conduit phone-control bridge: server->client requests to the Android app. Only productive
+    # while a phone-capability client (Conduit, ``phone_control: true``) is attached; without one
+    # every tool answers "Kein Conduit-Client ..." instead of failing the turn. This needs its own
+    # TOOLSETS entry (not just the names in ``_HERMES_CORE_TOOLS``): a platform list that expands a
+    # composite keeps only CONFIGURABLE_TOOLSETS, so bare registry toolsets get dropped.
+    "phone_control": _ts(
+        "Conduit phone control (Android Accessibility): screen snapshot, tap, type, swipe, back, screenshot",
+        ["phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot"],
+    ),
 
     # Coding posture, auto-selected in a code workspace (agent/coding_context.py).
     # `desktop_ui` is folded in separately by the GUI gateway for desktop sessions.
