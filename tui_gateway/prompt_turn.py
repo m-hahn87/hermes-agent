@@ -1132,10 +1132,11 @@ def _run_prompt_submit(
     terminal_callback: Callable[[dict[str, Any]], None] | None = None,
     turn_author: dict | None = None, report_ownership_refusal: bool = True,
     origin_transport: Any | None = None) -> bool:
-    # The turn's native-action authority: exactly the socket that submitted it, captured before the
-    # worker thread starts. Synthesized turns (queued drain of a dead socket, cron, wake-ups) carry
-    # none and therefore fail closed. Never resolved from the newest connected phone at tool time.
-    turn_origin = origin_transport if origin_transport is not None else current_transport()
+    # The turn's native-action authority: exactly the socket the admission captured, handed in
+    # explicitly before the worker thread started. Synthesized turns (queued drain, cron, wake-ups,
+    # compute-host children) pass none and therefore fail closed. Never resolved from whatever
+    # transport happens to be ambient in this context (a stdio fallback or a later socket).
+    turn_origin = origin_transport
     # Every dispatch binds the session's own row (session_key, real source) before the turn writes:
     # the synthesized turns that enter here directly (crash auto-continue, queued-prompt drain,
     # wake-ups) bypass prompt.submit's persist, and a row-less turn is otherwise materialized by

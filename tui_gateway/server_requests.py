@@ -126,6 +126,9 @@ def can_replay_request(method: str, params: dict) -> bool:
 # fixtures that patch ``sys.modules`` around the server import.
 _write: Callable[[dict], Any] = lambda frame: None
 _emit: Callable[[str, str, dict], Any] = lambda event, sid, payload: None
+# Builds the canonical ``event`` frame (contract-checked by the server module that owns it) so a
+# socket-pinned cancellation reaches only that socket with the same wire shape ``_emit`` produces.
+_event_frame: Callable[[str, str, dict], dict] | None = None
 # ``answerable(sid)``: False only when every client attached to the session is a build that never
 # advertised handling server→client requests (session_transports.py::_session_client_answers_requests).
 _answerable: Callable[[str], bool] = lambda sid: True
@@ -145,11 +148,14 @@ _answering_clients: set = set()
 
 
 def bind_sinks(write_json: Callable[[dict], Any], emit: Callable[[str, str, dict], Any],
-               answerable: Callable[[str], bool], clients: Callable[[str], list] | None = None) -> None:
-    global _write, _emit, _answerable, _clients
+               answerable: Callable[[str], bool], clients: Callable[[str], list] | None = None,
+               event_frame: Callable[[str, str, dict], dict] | None = None) -> None:
+    global _write, _emit, _answerable, _clients, _event_frame
     _write, _emit, _answerable = write_json, emit, answerable
     if clients is not None:
         _clients = clients
+    if event_frame is not None:
+        _event_frame = event_frame
 
 
 def advertise(transport: Any, server_requests: bool) -> None:
@@ -234,14 +240,27 @@ def _unanswerable(method: str, sid: str) -> bool:
 
 
 def _emit_cancel(req: ServerRequest, reason: str) -> None:
-    _emit("request.cancel", req.sid, {"id": req.id, "method": req.method, "reason": reason})
+    payload = {"id": req.id, "method": req.method, "reason": reason}
+    if req.transport is not None and _event_frame is not None:
+        # A request pinned to one socket (native actions) is cancelled on THAT socket only: the
+        # session-wide emit would show the card to every other viewer and cannot be untold.
+        try:
+            req.transport.write(_event_frame("request.cancel", req.sid, payload))
+        except Exception:
+            logger.debug("server request %s: pinned cancel write failed", req.id, exc_info=True)
+        return
+    _emit("request.cancel", req.sid, payload)
 
 
-def _register(req: ServerRequest) -> bool:
+def _register(req: ServerRequest, deadline: float | None = None) -> bool:
     """Publish and write *req*; returns whether the frame reached the transport's writer.
-    ``False`` is the only proof the request was never dispatched (peer already gone)."""
+    ``False`` is the only proof the request was never dispatched (peer already gone). With an
+    absolute *deadline* a transport that supports :meth:`write_bounded` refuses to enqueue after
+    it and reports a still-pending send as dispatched (uncertain), never as unsent."""
     from tui_gateway.contracts import registry as contracts
 
+    if deadline is not None and time.monotonic() >= deadline:
+        return False
     contract = contracts.SERVER_REQUESTS.get(req.method)
     if contract is None:
         raise RuntimeError(f"server request {req.method!r} has no contract in tui_gateway/contracts")
@@ -258,7 +277,15 @@ def _register(req: ServerRequest) -> bool:
         _open[req.id] = req
     delivered = False
     try:
-        delivered = (req.transport.write if req.transport is not None else _write)(frame) is not False
+        if req.transport is not None and deadline is not None:
+            bounded = getattr(req.transport, "write_bounded", None)
+            if bounded is not None:
+                # ``None`` = enqueued but still pending: dispatched, outcome uncertain.
+                delivered = bounded(frame, deadline) is not False
+            else:
+                delivered = req.transport.write(frame) is not False
+        else:
+            delivered = (req.transport.write if req.transport is not None else _write)(frame) is not False
     finally:
         with _lock:
             req.writing = False
@@ -299,9 +326,9 @@ def send(method: str, sid: str, params: dict, *, timeout: float | None,
     req = ServerRequest(sid, method, params, qids=qids)
     req.transport = transport
     if dispatch_receipt is not None:
-        dispatch_receipt.append(_register(req))
+        dispatch_receipt.append(_register(req, deadline))
     else:
-        _register(req)
+        _register(req, deadline)
     wait_for = timeout
     if deadline is not None:
         remaining = max(0.0, deadline - time.monotonic())

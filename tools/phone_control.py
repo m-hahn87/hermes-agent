@@ -243,10 +243,24 @@ def _validate_arguments(action: str, arguments) -> tuple[dict | None, str | None
 
 
 def _actions_origin() -> tuple[object | None, str | None]:
-    """The turn's own authenticated, v1-registered socket — never the newest global phone."""
-    origin = turn_origin_transport()
-    if origin is None:
-        return None, "no proven turn origin"
+    """The turn's own authenticated, v1-registered socket — never the newest global phone.
+
+    The authority-backed dashboard path binds an ephemeral :class:`NativeTurnOrigin` for exactly
+    this admission (principal, profile, session, socket, admission id); an origin present but
+    invalid is a refusal, never a fallback to another transport. The legacy sidecar path binds the
+    submitting socket explicitly at ``prompt.submit`` admission.
+    """
+    from gateway.native_turn_origin import current_native_turn_origin
+    admitted = current_native_turn_origin()
+    if admitted is not None:
+        origin = admitted.transport
+        refusal = "admitted turn origin unbound" if origin is None else None
+    else:
+        origin, refusal = turn_origin_transport(), None
+        if origin is None:
+            refusal = "no proven turn origin"
+    if refusal is not None:
+        return None, refusal
     if getattr(origin, "_closed", False):
         return None, "origin socket disconnected"
     from gateway.session_identity import is_authenticated_identity

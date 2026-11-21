@@ -206,7 +206,12 @@ def test_run_timeout_is_unknown_outcome_with_no_replay(monkeypatch):
         reset_turn_origin(token)
 
     assert out["status"] == "unknown_outcome"
-    assert len(sock.frames) == 1
+    # Exactly one dispatch of the action and at most one cancellation of that same request; never a
+    # blind replay of the action itself.
+    runs = [f for f in sock.frames if f.get("method") == "phone.actions.run"]
+    cancels = [f for f in sock.frames if f.get("method") == "request.cancel"]
+    assert len(runs) == 1, sock.frames
+    assert len(cancels) <= 1, sock.frames
 
 
 @pytest.mark.parametrize("answer", [

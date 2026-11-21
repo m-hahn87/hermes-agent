@@ -1,6 +1,7 @@
 """Trusted messaging admission and the existing TurnRunner invocation boundary."""
 import asyncio
 import logging
+import time
 from contextvars import ContextVar
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import replace
@@ -274,6 +275,50 @@ def row_turn_author(policy, row):
     return forward_author(policy)
 
 
+def claim_native_turn_origin(authority, ref, row):
+    """Claim + bind the ephemeral native-action origin of THIS in-process admission.
+
+    The ONE place every redemption condition is re-checked, at the moment the claimed row is
+    executed here:
+
+    * the exact ``admission_id``, ``session_id``, ``profile_id`` and authenticated principal of the
+      row being executed agree with the registration;
+    * the registration is not older than ``ORIGIN_TTL_S``;
+    * the registered socket is still alive (never latched closed) and still carries an
+      authenticated identity at redemption — a dead socket's queued turn fails closed.
+
+    One-shot: the entry is spent whatever the verdict. Managed (out-of-process) workers, recovered,
+    replayed and synthesized turns never reach this call, so they bind nothing.
+    """
+    from gateway.native_turn_origin import (
+        ORIGIN_TTL_S, bind_native_turn_origin, pop_registered_origin)
+    entry = pop_registered_origin(authority, row.get('admission_id'))
+    origin = None
+    if entry is not None:
+        registered_at, candidate = entry
+        if (time.monotonic() - registered_at <= ORIGIN_TTL_S
+                and candidate.admission_id == row.get('admission_id')
+                and candidate.session_id == ref.session_id
+                and candidate.profile_id == ref.profile_id
+                and candidate.principal == row.get('principal_id')
+                and _origin_socket_usable(candidate.transport)):
+            origin = candidate
+    return bind_native_turn_origin(origin)
+
+
+def _origin_socket_usable(transport) -> bool:
+    """The registered socket is still the live, authenticated one that made the submission."""
+    if transport is None or getattr(transport, "_closed", None) is True:
+        return False
+    from gateway.session_identity import is_authenticated_identity
+    return is_authenticated_identity(getattr(transport, "auth_identity", None))
+
+
+def release_native_turn_origin(token) -> None:
+    from gateway.native_turn_origin import reset_native_turn_origin
+    reset_native_turn_origin(token)
+
+
 async def execute_admission(authority, ref, row):
     busy_turn_started(row['admission_id'])
     from gateway.session_completion_notes import note_if_unviewed
@@ -290,6 +335,11 @@ async def execute_admission(authority, ref, row):
     policy = managed_policy(authority, ref)
     if policy is not None:
         return await admit_managed(authority, ref, row, policy)
+    # Native-action provenance is bound only on THIS process's in-process execution of the exact
+    # admission an authenticated dashboard socket submitted. A managed (out-of-process) worker, a
+    # queued drain, a recovered/replayed turn or any synthesized input claims nothing and fails
+    # closed in phone_actions. One-shot: claiming removes the entry.
+    origin_token = claim_native_turn_origin(authority, ref, row)
     live = authority.sessions[ref.session_id]
     # The key the turn registers its post-delivery slot under; a rebind mid-turn must not move the take.
     route = live.route
@@ -386,6 +436,7 @@ async def execute_admission(authority, ref, row):
             _take_post_delivery(authority, row['admission_id'], event.source, route)
         if not handed:
             await _release_turn_marker(authority, event)
+        release_native_turn_origin(origin_token)
         executing_admission.reset(token)
         execution_result.reset(result_token)
         api_execution.reset(api_token)

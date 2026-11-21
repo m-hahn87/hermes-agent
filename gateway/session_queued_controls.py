@@ -236,5 +236,8 @@ async def replace_queued(connection, ref, params):
         elif old['status'] == 'queued':
             authority.cancel_obligations.discard(old_id)  # refused: nothing committed
     from gateway.session_ingress_media import release_admission_media
+    # The replacement is this socket's own dashboard admission: its eventual in-process execution
+    # may carry native-action provenance under the same redemption checks as ``prompt.submit``.
+    connection.remember_native_turn_origin(admitted, ref)
     await asyncio.to_thread(release_admission_media, authority.db, old_id)
     return asdict(admitted)

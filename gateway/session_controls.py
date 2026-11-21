@@ -776,7 +776,25 @@ class AuthorityConnection:
         # The interactive WS is the one surface a restart's after-turn wait admits (#139041).
         receipt = await self.authority.submit(self.actor, self.submission(ref, params),
                                               queue_while_restarting=self._operator is True)
+        # Native-action provenance: the admission this authenticated socket just made, keyed by the
+        # admission id the ledger returned. The canonical dashboard receipt is ``queued`` (the drain
+        # claims it right after this step) and may only be redeemed in-process under the checks in
+        # ``session_ingress.claim_native_turn_origin`` — never by the receipt's status here.
+        self.remember_native_turn_origin(receipt, ref)
         return asdict(receipt)
+
+    def remember_native_turn_origin(self, receipt, ref):
+        """Register THIS socket's admission as the only possible native-action origin."""
+        if self.transport is None or 'session:submit' not in self.actor.capabilities:
+            return
+        from gateway.session_identity import is_authenticated_identity
+        if not is_authenticated_identity(getattr(self.transport, 'auth_identity', None)):
+            return
+        from gateway.native_turn_origin import NativeTurnOrigin, register_native_turn_origin
+        register_native_turn_origin(self.authority, NativeTurnOrigin(
+            principal=self.actor.subject, profile_id=ref.profile_id,
+            session_id=ref.session_id, admission_id=receipt.admission_id,
+            transport=self.transport))
 
     def _voice_stop_key(self, ref, params):
         request_id = params.get('submission_id') or params.get('input_id')
@@ -974,5 +992,8 @@ class AuthorityConnection:
                 await arm_detached_orphan_close(self.authority, session_id)
         from gateway.session_local_migration import unbind_native_transport
         unbind_native_transport(self.authority, self.actor)
+        # A disconnected socket's unexecuted native-action origin dies with it: the turn fails closed.
+        from gateway.native_turn_origin import revoke_native_turn_origins
+        revoke_native_turn_origins(self.authority, transport=self.transport)
         self.subscriptions.clear()
         self.authority.events.pop(self.actor.transport_id, None)
