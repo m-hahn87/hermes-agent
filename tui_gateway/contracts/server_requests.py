@@ -445,3 +445,60 @@ server_request("phone.back", params=PhoneBackRequestParams, result=PhoneActionRe
                doc="Conduit phone control: global back action.")
 server_request("phone.screenshot", params=PhoneScreenshotRequestParams, result=PhoneScreenshotResult,
                doc="Conduit phone control: capture a downscaled screenshot as a data-URL.")
+
+
+# ── native phone actions v1 (Conduit Android) ─────────────────────────────────────────────────
+# Registered separately from ``phone_control``: the app re-sends ``client.capabilities`` with
+# ``phone_actions_version: 1`` only after this backend listed both methods, so an old gateway never
+# sees the key. The tool is bound to the authenticated originating socket of the turn.
+
+
+class PhoneActionsStatus(WireEnum):
+    ok = "ok"
+    handed_off = "handed_off"
+    confirmed = "confirmed"
+    denied = "denied"
+    disabled = "disabled"
+    needs_foreground = "needs_foreground"
+    permission_required = "permission_required"
+    target_unavailable = "target_unavailable"
+    invalid_arguments = "invalid_arguments"
+    cancelled = "cancelled"
+    duplicate = "duplicate"
+    unknown_outcome = "unknown_outcome"
+    unavailable = "unavailable"
+
+
+class PhoneActionsListRequestParams(ServerRequestParams):
+    """``phone.actions.list``: the currently allowed native action ids (metadata only)."""
+
+    version: Literal[1]
+
+
+class PhoneActionsListResult(Result):
+    status: PhoneActionsStatus
+    version: Literal[1] | None = None
+    actions: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+server_request("phone.actions.list", params=PhoneActionsListRequestParams, result=PhoneActionsListResult,
+               doc="Conduit native actions v1: list the currently allowed action ids (no side effect).")
+
+
+class PhoneActionsRunRequestParams(ServerRequestParams):
+    """``phone.actions.run``: one bounded native action; the request id is the one-shot key."""
+
+    version: Literal[1]
+    action: Literal["alarm.set", "timer.set", "maps.open"]
+    arguments: dict[str, JsonValue]
+
+
+class PhoneActionsRunResult(Result):
+    status: PhoneActionsStatus
+    action: str | None = None
+    error: str | None = None
+
+
+server_request("phone.actions.run", params=PhoneActionsRunRequestParams, result=PhoneActionsRunResult,
+               doc="Conduit native actions v1: run one vetted action after on-device approval. Never retried.")

@@ -179,11 +179,38 @@ def phone_transport() -> Any | None:
         return max(_phone_transports.items(), key=lambda item: item[1])[0]
 
 
+# Transports that registered native actions v1 (``client.capabilities {phone_actions_version: 1}``).
+# Registration is per-socket: it is NOT a session/global phone pointer, so another phone that
+# connected later can never run an action for a turn it did not submit. Disconnect revokes it.
+_phone_action_transports: dict[Any, int] = {}
+
+
+def advertise_phone_actions(transport: Any, version: Any) -> None:
+    """Record (or clear) *transport*'s native-actions v1 registration. Anything but 1 is no registration."""
+    with _lock:
+        if type(version) is int and version == 1:
+            _phone_action_transports[transport] = 1
+        else:
+            _phone_action_transports.pop(transport, None)
+
+
+def phone_actions_registered(transport: Any) -> bool:
+    """True only for the exact socket that negotiated native actions v1."""
+    if transport is None:
+        return False
+    with _lock:
+        return _phone_action_transports.get(transport) == 1
+
+
 def forget(transport: Any) -> None:
-    """Drop a disconnected transport's advertisement."""
+    """Drop a disconnected transport's advertisement and end its pinned pending requests."""
     with _lock:
         _answering_clients.discard(transport)
         _phone_transports.pop(transport, None)
+        _phone_action_transports.pop(transport, None)
+    # A pinned native-action request must not outlive its socket: the tool sees None and reports
+    # unknown_outcome (never a retry), and no reconnecting client inherits the card.
+    cancel(None, "disconnect", transport=transport)
 
 
 def answers_requests(transport: Any) -> bool:
@@ -391,14 +418,17 @@ def lock_answer(request_id: str, question_id: str, answer: str | None) -> list[s
     return remaining
 
 
-def cancel(sid: str | None = None, reason: str = "interrupted", *, method: str | None = None) -> int:
+def cancel(sid: str | None = None, reason: str = "interrupted", *, method: str | None = None,
+           transport: Any = None) -> int:
     """Withdraw open requests — only *sid*'s (session.interrupt must not touch other sessions'), or
-    every one when *sid* is None (shutdown); *method* narrows it to one request kind. Blocked waits
+    every one when *sid* is None (shutdown); *method* narrows it to one request kind and *transport*
+    to requests pinned to one client socket (disconnect). Blocked waits
     return None (a batch returns its locked answers with ``outcome: cancelled``); queue-backed requests
     run ``on_result(None)`` so their owner can settle. Returns the number withdrawn."""
     with _lock:
         targets = [req for req in _open.values()
-                   if (sid is None or req.sid == sid) and (method is None or req.method == method)]
+                   if (sid is None or req.sid == sid) and (method is None or req.method == method)
+                   and (transport is None or req.transport is transport)]
         for req in targets:
             _open.pop(req.id, None)
             if req.qids is not None:
@@ -460,3 +490,5 @@ def reset_for_tests() -> None:
     with _lock:
         _open.clear()
         _answering_clients.clear()
+        _phone_transports.clear()
+        _phone_action_transports.clear()

@@ -36,6 +36,8 @@ _HERMES_CORE_TOOLS = [
     # Conduit phone-control bridge (server-request tools): productive only when a
     # phone-capability client (Conduit Android) is attached to the session.
     "phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot",
+    # Native actions v1 (list/run): one tool, gated on the turn's own authenticated socket.
+    "phone_actions",
 ]
 
 # Webhook payloads are untrusted third-party content: no file/system execution.
@@ -178,7 +180,8 @@ TOOLSETS = {
     # composite keeps only CONFIGURABLE_TOOLSETS, so bare registry toolsets get dropped.
     "phone_control": _ts(
         "Conduit phone control (Android Accessibility): screen snapshot, tap, type, swipe, back, screenshot",
-        ["phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot"],
+        ["phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot",
+         "phone_actions"],
     ),
 
     # Coding posture, auto-selected in a code workspace (agent/coding_context.py).

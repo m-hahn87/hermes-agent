@@ -12318,6 +12318,24 @@
             "title": "Server Requests",
             "type": "boolean"
           },
+          "phone_control": {
+            "default": false,
+            "title": "Phone Control",
+            "type": "boolean"
+          },
+          "phone_actions_version": {
+            "anyOf": [
+              {
+                "const": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Phone Actions Version"
+          },
           "desktop_local": {
             "default": false,
             "title": "Desktop Local",
@@ -28059,6 +28077,165 @@
         },
         "title": "PhoneActionResult",
         "type": "object"
+      },
+      "PhoneActionsListRequestParams": {
+        "additionalProperties": false,
+        "description": "``phone.actions.list``: the currently allowed native action ids (metadata only).",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "version": {
+            "const": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "version"
+        ],
+        "title": "PhoneActionsListRequestParams",
+        "type": "object"
+      },
+      "PhoneActionsListResult": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PhoneActionsStatus"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "const": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PhoneActionsListResult",
+        "type": "object"
+      },
+      "PhoneActionsRunRequestParams": {
+        "additionalProperties": false,
+        "description": "``phone.actions.run``: one bounded native action; the request id is the one-shot key.",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "version": {
+            "const": 1,
+            "title": "Version",
+            "type": "integer"
+          },
+          "action": {
+            "enum": [
+              "alarm.set",
+              "timer.set",
+              "maps.open"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "session_id",
+          "version",
+          "action",
+          "arguments"
+        ],
+        "title": "PhoneActionsRunRequestParams",
+        "type": "object"
+      },
+      "PhoneActionsRunResult": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PhoneActionsStatus"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Action"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PhoneActionsRunResult",
+        "type": "object"
+      },
+      "PhoneActionsStatus": {
+        "enum": [
+          "ok",
+          "handed_off",
+          "confirmed",
+          "denied",
+          "disabled",
+          "needs_foreground",
+          "permission_required",
+          "target_unavailable",
+          "invalid_arguments",
+          "cancelled",
+          "duplicate",
+          "unknown_outcome",
+          "unavailable"
+        ],
+        "title": "PhoneActionsStatus",
+        "type": "string"
       },
       "PhoneBackRequestParams": {
         "additionalProperties": false,
@@ -50856,6 +51033,42 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/ValueResult"
+        }
+      }
+    },
+    {
+      "name": "phone.actions.list",
+      "summary": "Conduit native actions v1: list the currently allowed action ids (no side effect).",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneActionsListRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionsListResult"
+        }
+      }
+    },
+    {
+      "name": "phone.actions.run",
+      "summary": "Conduit native actions v1: run one vetted action after on-device approval. Never retried.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneActionsRunRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionsRunResult"
         }
       }
     },

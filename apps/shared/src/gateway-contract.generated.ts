@@ -2000,6 +2000,8 @@ export interface GatewayCapabilitiesResult {
 }
 export interface ClientCapabilitiesParams {
   server_requests?: boolean
+  phone_control?: boolean
+  phone_actions_version?: 1 | null
   desktop_local?: boolean
 }
 export interface ClientCapabilitiesResult {
@@ -5805,6 +5807,30 @@ export interface PhoneScreenshotResult {
   data_url?: string | null
   error?: Record<string, unknown> | null
 }
+/** ``phone.actions.list``: the currently allowed native action ids (metadata only). */
+export interface PhoneActionsListRequestParams {
+  session_id: string
+  version: 1
+}
+export interface PhoneActionsListResult {
+  status: PhoneActionsStatus
+  version?: 1 | null
+  actions?: string[]
+  error?: string | null
+}
+export type PhoneActionsStatus = 'ok' | 'handed_off' | 'confirmed' | 'denied' | 'disabled' | 'needs_foreground' | 'permission_required' | 'target_unavailable' | 'invalid_arguments' | 'cancelled' | 'duplicate' | 'unknown_outcome' | 'unavailable'
+/** ``phone.actions.run``: one bounded native action; the request id is the one-shot key. */
+export interface PhoneActionsRunRequestParams {
+  session_id: string
+  version: 1
+  action: 'alarm.set' | 'timer.set' | 'maps.open'
+  arguments: Record<string, unknown>
+}
+export interface PhoneActionsRunResult {
+  status: PhoneActionsStatus
+  action?: string | null
+  error?: string | null
+}
 export interface DisplayInstallSudoParams {
   session_id: string
   profile_key: string
@@ -7262,6 +7288,10 @@ export interface ServerRequestMap {
   clarify: { params: ClarifyRequestParams; result: ClarifyResult }
   /** Masked sudo password for the Bot Screen package install; app-level (empty session). */
   'display.install.sudo': { params: DisplayInstallSudoParams; result: ValueResult }
+  /** Conduit native actions v1: list the currently allowed action ids (no side effect). */
+  'phone.actions.list': { params: PhoneActionsListRequestParams; result: PhoneActionsListResult }
+  /** Conduit native actions v1: run one vetted action after on-device approval. Never retried. */
+  'phone.actions.run': { params: PhoneActionsRunRequestParams; result: PhoneActionsRunResult }
   /** Conduit phone control: global back action. */
   'phone.back': { params: PhoneBackRequestParams; result: PhoneActionResult }
   /** Conduit phone control: read the active screen as an LLM-friendly node list. */
@@ -7306,6 +7336,8 @@ export const SERVER_REQUEST_METHODS = [
   'approval',
   'clarify',
   'display.install.sudo',
+  'phone.actions.list',
+  'phone.actions.run',
   'phone.back',
   'phone.screen',
   'phone.screenshot',

@@ -49,9 +49,30 @@ _current_transport: contextvars.ContextVar[Optional[Transport]] = contextvars.Co
     "hermes_gateway_transport", default=None
 )
 
+# The exact client socket that submitted the turn currently running. Bound once per turn thread
+# (prompt_turn.run_body) and never derived from a global registry: a later reconnect of a different
+# phone must not inherit a running turn's authority.
+_turn_origin_transport: contextvars.ContextVar[Optional[Transport]] = contextvars.ContextVar(
+    "hermes_gateway_turn_origin", default=None
+)
+
 
 def current_transport() -> Optional[Transport]:
     return _current_transport.get()
+
+
+def turn_origin_transport() -> Optional[Transport]:
+    """The socket that submitted this turn, or ``None`` for synthesized/relayed turns."""
+    return _turn_origin_transport.get()
+
+
+def bind_turn_origin(transport: Optional[Transport]):
+    """Bind the submitting socket for the current turn; returns a token for :func:`reset_turn_origin`."""
+    return _turn_origin_transport.set(transport)
+
+
+def reset_turn_origin(token) -> None:
+    _turn_origin_transport.reset(token)
 
 
 def bind_transport(transport: Optional[Transport]):

@@ -55,7 +55,8 @@ from tui_gateway.user_messages import (
     AGENT_BUILD_ABANDONED, AGENT_MISSING_FOR_TURN, AGENT_STILL_STARTING, agent_init_failed_message, busy_message,
     resume_failed_message, turn_error_text)
 from tui_gateway.transport import (FanoutTransport, StdioTransport, Transport, bind_transport,
-                                   current_transport, reset_transport)
+                                   bind_turn_origin, current_transport, reset_transport,
+                                   reset_turn_origin)
 
 logger = logging.getLogger(__name__)
 
