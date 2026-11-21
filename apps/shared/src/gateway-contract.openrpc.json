@@ -28046,6 +28046,29 @@
         "title": "PetThumbResult",
         "type": "object"
       },
+      "PhoneActionId": {
+        "enum": [
+          "alarm.set",
+          "timer.set",
+          "maps.open"
+        ],
+        "title": "PhoneActionId",
+        "type": "string"
+      },
+      "PhoneActionRef": {
+        "additionalProperties": false,
+        "description": "One allowed action id; descriptions/schemas are gateway-owned, never client text.",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/PhoneActionId"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "PhoneActionRef",
+        "type": "object"
+      },
       "PhoneActionResult": {
         "additionalProperties": false,
         "properties": {
@@ -28101,6 +28124,7 @@
       },
       "PhoneActionsListResult": {
         "additionalProperties": false,
+        "description": "Success EXACTLY ``{status:\"ok\",version:1,actions:[{id}...]}`` (max 32, known ids).\nAn error answer carries only ``status``. Validation is enforced in tools/phone_control.py too.",
         "properties": {
           "status": {
             "$ref": "#/components/schemas/PhoneActionsStatus"
@@ -28119,23 +28143,20 @@
             "title": "Version"
           },
           "actions": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Actions",
-            "type": "array"
-          },
-          "error": {
             "anyOf": [
               {
-                "type": "string"
+                "items": {
+                  "$ref": "#/components/schemas/PhoneActionRef"
+                },
+                "maxItems": 32,
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
             "default": null,
-            "title": "Error"
+            "title": "Actions"
           }
         },
         "required": [
@@ -28183,33 +28204,10 @@
       },
       "PhoneActionsRunResult": {
         "additionalProperties": false,
+        "description": "Run answers exactly ``{status:...}``; the current adapters can only ``handed_off`` \u2014 an\n``ok``/``confirmed`` answer or any extra key is an invalid app response (unknown_outcome).",
         "properties": {
           "status": {
             "$ref": "#/components/schemas/PhoneActionsStatus"
-          },
-          "action": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Action"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Error"
           }
         },
         "required": [

@@ -475,11 +475,25 @@ class PhoneActionsListRequestParams(ServerRequestParams):
     version: Literal[1]
 
 
+class PhoneActionId(WireEnum):
+    alarm_set = "alarm.set"
+    timer_set = "timer.set"
+    maps_open = "maps.open"
+
+
+class PhoneActionRef(Result):
+    """One allowed action id; descriptions/schemas are gateway-owned, never client text."""
+
+    id: PhoneActionId
+
+
 class PhoneActionsListResult(Result):
+    """Success EXACTLY ``{status:"ok",version:1,actions:[{id}...]}`` (max 32, known ids).
+    An error answer carries only ``status``. Validation is enforced in tools/phone_control.py too."""
+
     status: PhoneActionsStatus
     version: Literal[1] | None = None
-    actions: list[str] = Field(default_factory=list)
-    error: str | None = None
+    actions: list[PhoneActionRef] | None = Field(default=None, max_length=32)
 
 
 server_request("phone.actions.list", params=PhoneActionsListRequestParams, result=PhoneActionsListResult,
@@ -495,9 +509,10 @@ class PhoneActionsRunRequestParams(ServerRequestParams):
 
 
 class PhoneActionsRunResult(Result):
+    """Run answers exactly ``{status:...}``; the current adapters can only ``handed_off`` — an
+    ``ok``/``confirmed`` answer or any extra key is an invalid app response (unknown_outcome)."""
+
     status: PhoneActionsStatus
-    action: str | None = None
-    error: str | None = None
 
 
 server_request("phone.actions.run", params=PhoneActionsRunRequestParams, result=PhoneActionsRunResult,

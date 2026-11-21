@@ -5812,13 +5812,18 @@ export interface PhoneActionsListRequestParams {
   session_id: string
   version: 1
 }
+/** Success EXACTLY ``{status:"ok",version:1,actions:[{id}...]}`` (max 32, known ids). An error answer carries only ``status``. Validation is enforced in tools/phone_control.py too. */
 export interface PhoneActionsListResult {
   status: PhoneActionsStatus
   version?: 1 | null
-  actions?: string[]
-  error?: string | null
+  actions?: PhoneActionRef[] | null
 }
 export type PhoneActionsStatus = 'ok' | 'handed_off' | 'confirmed' | 'denied' | 'disabled' | 'needs_foreground' | 'permission_required' | 'target_unavailable' | 'invalid_arguments' | 'cancelled' | 'duplicate' | 'unknown_outcome' | 'unavailable'
+/** One allowed action id; descriptions/schemas are gateway-owned, never client text. */
+export interface PhoneActionRef {
+  id: PhoneActionId
+}
+export type PhoneActionId = 'alarm.set' | 'timer.set' | 'maps.open'
 /** ``phone.actions.run``: one bounded native action; the request id is the one-shot key. */
 export interface PhoneActionsRunRequestParams {
   session_id: string
@@ -5826,10 +5831,9 @@ export interface PhoneActionsRunRequestParams {
   action: 'alarm.set' | 'timer.set' | 'maps.open'
   arguments: Record<string, unknown>
 }
+/** Run answers exactly ``{status:...}``; the current adapters can only ``handed_off`` — an ``ok``/``confirmed`` answer or any extra key is an invalid app response (unknown_outcome). */
 export interface PhoneActionsRunResult {
   status: PhoneActionsStatus
-  action?: string | null
-  error?: string | null
 }
 export interface DisplayInstallSudoParams {
   session_id: string

@@ -194,8 +194,9 @@ _STATUSES = frozenset({
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
-def _actions_fail(message: str, status: str = "unavailable") -> str:
-    return tool_result({"status": status, "error": message})
+def _actions_fail(status: str = "unavailable") -> str:
+    # Wire errors carry status only: never our diagnostics or a client-supplied message.
+    return tool_result({"status": status})
 
 
 def _valid_int(value, low: int, high: int) -> bool:
@@ -245,31 +246,38 @@ def _actions_origin() -> tuple[object | None, str | None]:
     """The turn's own authenticated, v1-registered socket — never the newest global phone."""
     origin = turn_origin_transport()
     if origin is None:
-        return None, "Kein nachweisbarer Ursprungs-Socket fuer diesen Turn."
+        return None, "no proven turn origin"
     if getattr(origin, "_closed", False):
-        return None, "Ursprungs-Socket ist getrennt."
+        return None, "origin socket disconnected"
     from gateway.session_identity import is_authenticated_identity
     if not is_authenticated_identity(getattr(origin, "auth_identity", None)):
-        return None, "Ursprungs-Socket ist nicht authentifiziert."
+        return None, "origin socket unauthenticated"
     if not server_requests.phone_actions_registered(origin):
-        return None, "Native Aktionen v1 sind auf diesem Socket nicht registriert."
+        return None, "phone actions v1 not registered on origin"
     return origin, None
 
 
+_ACTION_IDS = frozenset(_ACTION_SPECS)
+
+
 def _actions_list_payload(result) -> dict:
-    if not isinstance(result, dict) or result.get("status") != "ok":
+    """Strictly ``{status:"ok",version:1,actions:[{id}...]}`` or ``{status}`` only."""
+    if isinstance(result, dict) and set(result) == {"status"} and result.get("status") in _STATUSES:
+        return {"status": result["status"]}
+    if not isinstance(result, dict) or set(result) != {"status", "version", "actions"}:
         return {"status": "unavailable"}
-    if result.get("version", 1) != 1:
+    if result.get("status") != "ok" or type(result.get("version")) is not int or result["version"] != 1:
         return {"status": "unavailable"}
     actions = result.get("actions")
     if not isinstance(actions, list) or len(actions) > PHONE_ACTIONS_MAX_LIST:
         return {"status": "unavailable"}
     ids: list[str] = []
     for item in actions:
-        aid = item if isinstance(item, str) else (
-            item.get("id") if isinstance(item, dict) and set(item) == {"id"} else None)
-        if not isinstance(aid, str) or aid not in _ACTION_SPECS:
-            return {"status": "unavailable"}  # unknown id/shape: fail closed, no partial list
+        if not isinstance(item, dict) or set(item) != {"id"}:
+            return {"status": "unavailable"}  # extras / wrong shape: fail closed, no partial list
+        aid = item.get("id")
+        if not isinstance(aid, str) or aid not in _ACTION_IDS:
+            return {"status": "unavailable"}
         if aid not in ids:
             ids.append(aid)
     return {"status": "ok", "version": 1,
@@ -277,19 +285,26 @@ def _actions_list_payload(result) -> dict:
 
 
 def _actions_run_payload(action: str, result) -> dict:
-    """Typed, bounded result. An unknown/invalid app answer is never success."""
-    status = result.get("status") if isinstance(result, dict) else None
-    if not isinstance(status, str) or status not in _STATUSES:
-        status = "unknown_outcome"
-    return {"status": status, "action": action}
+    """The current adapters only ever hand off: strict ``{status}``, never ok/confirmed, no extras."""
+    if not isinstance(result, dict) or set(result) != {"status"}:
+        return {"status": "unknown_outcome"}
+    status = result.get("status")
+    if not isinstance(status, str) or status not in _STATUSES or status in {"ok", "confirmed"}:
+        return {"status": "unknown_outcome"}
+    return {"status": status}
 
 
-def _actions_request(method: str, origin, params: dict) -> dict | None:
+def _actions_request(method: str, origin, params: dict) -> tuple[dict | None, bool]:
+    """One live-only send bounded end-to-end by a monotonic deadline. Never retried."""
     sid = _approval_session_id.get()
     if not sid:
-        return None
-    return server_requests.send(method, sid, dict(params, version=1),
-                                timeout=PHONE_ACTIONS_TIMEOUT_S, transport=origin)
+        return None, False
+    deadline = time.monotonic() + PHONE_ACTIONS_TIMEOUT_S
+    receipt: list[bool] = []
+    result = server_requests.send(method, sid, dict(params, version=1),
+                                  timeout=None, transport=origin, deadline=deadline,
+                                  dispatch_receipt=receipt)
+    return result, bool(receipt and receipt[0])
 
 
 def phone_actions(args=None, **kwargs) -> str:
@@ -298,32 +313,38 @@ def phone_actions(args=None, **kwargs) -> str:
     operation = merged.get("operation")
     origin, refusal = _actions_origin()
     if refusal is not None:
-        return _actions_fail(refusal)
+        logger.info("phone actions refused: %s", refusal)
+        return _actions_fail()
 
     if operation == "list":
         started = time.monotonic()
-        result = _actions_request("phone.actions.list", origin, {})
-        payload = _actions_list_payload(result)
+        result, dispatched = _actions_request("phone.actions.list", origin, {})
+        payload = _actions_list_payload(result) if dispatched else {"status": "unavailable"}
         logger.info("phone actions list status=%s duration_ms=%d",
                     payload["status"], (time.monotonic() - started) * 1000)
         return tool_result(payload)
 
     if operation != "run":
-        return tool_result({"status": "invalid_arguments", "error": "operation muss list oder run sein."})
+        return tool_result({"status": "invalid_arguments"})
     action = merged.get("action")
     if not isinstance(action, str) or action not in _ACTION_SPECS:
-        return tool_result({"status": "invalid_arguments", "error": "Unbekannte Aktion."})
+        return tool_result({"status": "invalid_arguments"})
     arguments, problem = _validate_arguments(action, merged.get("arguments"))
     if problem is not None:
-        return tool_result({"status": "invalid_arguments", "error": problem})
+        logger.info("phone action rejected: %s", problem)
+        return tool_result({"status": "invalid_arguments"})
 
     started = time.monotonic()
     # Exactly one send; the srq id is the one-shot correlation key. No retry on timeout/disconnect:
-    # an uncertain outcome is reported as unknown_outcome, never as success and never replayed.
-    result = _actions_request("phone.actions.run", origin,
-                              {"action": action, "arguments": arguments})
-    payload = (_actions_run_payload(action, result) if result is not None
-               else {"status": "unknown_outcome", "action": action})
+    # proven no-send is unavailable, any dispatched-but-unanswered run is unknown_outcome.
+    result, dispatched = _actions_request("phone.actions.run", origin,
+                                          {"action": action, "arguments": arguments})
+    if not dispatched:
+        payload = {"status": "unavailable"}
+    elif result is None:
+        payload = {"status": "unknown_outcome"}
+    else:
+        payload = _actions_run_payload(action, result)
     logger.info("phone action=%s status=%s duration_ms=%d",
                 action, payload["status"], (time.monotonic() - started) * 1000)
     return tool_result(payload)

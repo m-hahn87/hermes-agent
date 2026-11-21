@@ -110,8 +110,15 @@ _lock = threading.Lock()
 _open: dict[str, ServerRequest] = {}
 
 
+_LIVE_ONLY_REQUESTS = frozenset({"phone.actions.list", "phone.actions.run"})
+
+
 def can_replay_request(method: str, params: dict) -> bool:
-    """Secure page scripts belong only to the original live request, never a resume."""
+    """Secure page scripts belong only to the original live request, never a resume.
+    Native phone-action requests are live-only too: their frame/params must never enter
+    ``open_requests``, resume snapshots, compute-host replay or diagnostic state."""
+    if method in _LIVE_ONLY_REQUESTS:
+        return False
     return not (method == "preview.act" and params.get("action") == "vault")
 
 # Frame sinks, bound by ``bind_sinks`` from server.py at import time (like the method_ctx split
@@ -230,7 +237,9 @@ def _emit_cancel(req: ServerRequest, reason: str) -> None:
     _emit("request.cancel", req.sid, {"id": req.id, "method": req.method, "reason": reason})
 
 
-def _register(req: ServerRequest) -> None:
+def _register(req: ServerRequest) -> bool:
+    """Publish and write *req*; returns whether the frame reached the transport's writer.
+    ``False`` is the only proof the request was never dispatched (peer already gone)."""
     from tui_gateway.contracts import registry as contracts
 
     contract = contracts.SERVER_REQUESTS.get(req.method)
@@ -247,8 +256,9 @@ def _register(req: ServerRequest) -> None:
     with _lock:
         req.writing = True
         _open[req.id] = req
+    delivered = False
     try:
-        (req.transport.write if req.transport is not None else _write)(frame)
+        delivered = (req.transport.write if req.transport is not None else _write)(frame) is not False
     finally:
         with _lock:
             req.writing = False
@@ -256,10 +266,12 @@ def _register(req: ServerRequest) -> None:
     if withdrawn is not None:
         # cancel() landed between publish and write: its request.cancel must follow the frame, not precede it.
         _emit_cancel(req, withdrawn)
+    return delivered
 
 
 def send(method: str, sid: str, params: dict, *, timeout: float | None,
-         qids: list[str] | None = None, transport: Any = None) -> dict | None:
+         qids: list[str] | None = None, transport: Any = None,
+         deadline: float | None = None, dispatch_receipt: list | None = None) -> dict | None:
     """Send one request and block for the response ``result`` (a dict).
 
     Returns ``None`` when the renderer never answered (timeout, cancel, or an error response — e.g.
@@ -269,14 +281,33 @@ def send(method: str, sid: str, params: dict, *, timeout: float | None,
     ``transport`` pins a session-less request to the client socket that asked for it (an RPC handler
     calling back into its own caller's window): the frame goes only there, only its response settles
     it, and any error from it (a decline included) is a refusal.
+
+    ``deadline`` is an absolute ``time.monotonic()`` bound for the WHOLE end-to-end send: an expired
+    deadline never writes (the request is not queued to start later), and the wait is bounded by
+    what remains after dispatch. ``dispatch_receipt`` (a list) receives ``True`` when the frame
+    reached the writer and ``False`` only when it provably did not — the native-action tool uses
+    that to distinguish ``unavailable`` from ``unknown_outcome`` without ever retrying.
     """
+    if deadline is not None and time.monotonic() >= deadline:
+        if dispatch_receipt is not None:
+            dispatch_receipt.append(False)
+        return None
     if transport is None and _unanswerable(method, sid):
+        if dispatch_receipt is not None:
+            dispatch_receipt.append(False)
         return None
     req = ServerRequest(sid, method, params, qids=qids)
     req.transport = transport
-    _register(req)
+    if dispatch_receipt is not None:
+        dispatch_receipt.append(_register(req))
+    else:
+        _register(req)
+    wait_for = timeout
+    if deadline is not None:
+        remaining = max(0.0, deadline - time.monotonic())
+        wait_for = remaining if timeout is None else min(timeout, remaining)
     try:
-        req.event.wait(timeout)
+        req.event.wait(wait_for)
     except BaseException:
         # The wait itself died (KeyboardInterrupt, SystemExit, injected error): withdraw the request
         # or it stays in _open forever — replayed to every reconnecting client and reported by
@@ -390,8 +421,13 @@ def resolve_response(frame: dict, transport: Any = None) -> bool:
             req.answered = True
     if "error" in frame:
         error = frame["error"] if isinstance(frame["error"], dict) else {}
-        logger.warning("server request %s (%s) answered with error %s: %s",
-                       rid, req.method, error.get("code"), error.get("message"))
+        if req.method in _LIVE_ONLY_REQUESTS:
+            # No client-supplied error text in diagnostics, even at debug level.
+            logger.warning("server request %s (%s) answered with error code %s",
+                           rid, req.method, error.get("code"))
+        else:
+            logger.warning("server request %s (%s) answered with error %s: %s",
+                           rid, req.method, error.get("code"), error.get("message"))
     if req.on_result is not None:
         req.on_result(req.result)
     req.event.set()
