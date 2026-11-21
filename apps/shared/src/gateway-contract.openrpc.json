@@ -12318,6 +12318,11 @@
             "title": "Server Requests",
             "type": "boolean"
           },
+          "phone_control": {
+            "default": false,
+            "title": "Phone Control",
+            "type": "boolean"
+          },
           "desktop_local": {
             "default": false,
             "title": "Desktop Local",
@@ -28028,6 +28033,220 @@
         "title": "PetThumbResult",
         "type": "object"
       },
+      "PhoneActionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "observation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Observation"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhoneError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "PhoneActionResult",
+        "type": "object"
+      },
+      "PhoneError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "PhoneError",
+        "type": "object"
+      },
+      "PhoneNodeParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "node_index": {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Node Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_index"
+        ],
+        "title": "PhoneNodeParams",
+        "type": "object"
+      },
+      "PhoneScreenResult": {
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Nodes"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhoneError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "PhoneScreenResult",
+        "type": "object"
+      },
+      "PhoneScreenshotResult": {
+        "additionalProperties": false,
+        "properties": {
+          "data_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data Url"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Height"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhoneError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "PhoneScreenshotResult",
+        "type": "object"
+      },
+      "PhoneSwipeParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "node_index": {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Node Index",
+            "type": "integer"
+          },
+          "delta_x": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "title": "Delta X",
+            "type": "integer"
+          },
+          "delta_y": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "title": "Delta Y",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_index",
+          "delta_x",
+          "delta_y"
+        ],
+        "title": "PhoneSwipeParams",
+        "type": "object"
+      },
+      "PhoneTypeParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "node_index": {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Node Index",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_index",
+          "text"
+        ],
+        "title": "PhoneTypeParams",
+        "type": "object"
+      },
       "PingParams": {
         "additionalProperties": false,
         "properties": {},
@@ -36150,6 +36369,21 @@
           "role"
         ],
         "title": "SeedMessage",
+        "type": "object"
+      },
+      "ServerRequestParams": {
+        "additionalProperties": false,
+        "description": "Every request frame's params start with the session the question belongs to.",
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "ServerRequestParams",
         "type": "object"
       },
       "SessionActivateParams": {
@@ -50657,6 +50891,114 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/ValueResult"
+        }
+      }
+    },
+    {
+      "name": "phone.back",
+      "summary": "Perform the Android Back action.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/ServerRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
+        }
+      }
+    },
+    {
+      "name": "phone.screen",
+      "summary": "Read the current Android accessibility node list.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/ServerRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneScreenResult"
+        }
+      }
+    },
+    {
+      "name": "phone.screenshot",
+      "summary": "Capture a JPEG image of the phone screen.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/ServerRequestParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneScreenshotResult"
+        }
+      }
+    },
+    {
+      "name": "phone.swipe",
+      "summary": "Swipe from a node center by signed pixel deltas.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneSwipeParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
+        }
+      }
+    },
+    {
+      "name": "phone.tap",
+      "summary": "Tap a node by its index from the latest phone_screen.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneNodeParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
+        }
+      }
+    },
+    {
+      "name": "phone.type",
+      "summary": "Replace the text of an editable node from the latest phone_screen.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/PhoneTypeParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/PhoneActionResult"
         }
       }
     },

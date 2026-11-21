@@ -31,6 +31,10 @@ def _session_live_transports(session: dict | None) -> list:
     return [peer for peer in peers if _transport_is_live_peer(peer)]
 
 
+def phone_peers(sid: str) -> list:
+    return _session_live_transports(_sessions.get(sid))
+
+
 def _session_has_live_transport(session: dict | None, *, excluding=None) -> bool:
     return any(peer is not excluding for peer in _session_live_transports(session))
 

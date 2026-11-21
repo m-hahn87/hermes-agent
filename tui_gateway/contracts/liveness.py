@@ -31,6 +31,7 @@ class ClientCapabilitiesParams(Params):
     #: error for methods it has no handler for. A WebSocket client that never says so is treated as a
     #: build older than server→client requests and every such request fails fast for it.
     server_requests: bool = False
+    phone_control: bool = False
     #: The client is the Desktop app connected to a backend on its own machine (its connection mode is
     #: local). Counted only on a connection that redeemed a native ticket minted over this machine's
     #: private control socket; it is what makes the welcome trial and first-run onboarding available

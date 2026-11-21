@@ -17,6 +17,7 @@ from . import (
     projects_pets,
     prompt_voice,
     server_requests,
+    phone,
     sessions,
     tools_commands,
     tools_mcp_plugins,

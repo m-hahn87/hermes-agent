@@ -2000,6 +2000,7 @@ export interface GatewayCapabilitiesResult {
 }
 export interface ClientCapabilitiesParams {
   server_requests?: boolean
+  phone_control?: boolean
   desktop_local?: boolean
 }
 export interface ClientCapabilitiesResult {
@@ -5771,6 +5772,42 @@ export interface DisplayInstallSudoParams {
   session_id: string
   profile_key: string
 }
+/** Every request frame's params start with the session the question belongs to. */
+export interface ServerRequestParams {
+  session_id: string
+}
+export interface PhoneScreenResult {
+  nodes?: Record<string, unknown>[] | null
+  error?: PhoneError | null
+}
+export interface PhoneError {
+  code: string
+}
+export interface PhoneNodeParams {
+  session_id: string
+  node_index: number
+}
+export interface PhoneActionResult {
+  observation?: string | null
+  error?: PhoneError | null
+}
+export interface PhoneTypeParams {
+  session_id: string
+  node_index: number
+  text: string
+}
+export interface PhoneSwipeParams {
+  session_id: string
+  node_index: number
+  delta_x: number
+  delta_y: number
+}
+export interface PhoneScreenshotResult {
+  data_url?: string | null
+  width?: number | null
+  height?: number | null
+  error?: PhoneError | null
+}
 /** ``methods_connectors._connection_update``: one target transition (``target``/``from``/``to``/ ``actor``) or the settlement (none of those), with the full snapshot. */
 export interface ConnectionUpdatePayload {
   op_id: string
@@ -7224,6 +7261,18 @@ export interface ServerRequestMap {
   clarify: { params: ClarifyRequestParams; result: ClarifyResult }
   /** Masked sudo password for the Bot Screen package install; app-level (empty session). */
   'display.install.sudo': { params: DisplayInstallSudoParams; result: ValueResult }
+  /** Perform the Android Back action. */
+  'phone.back': { params: ServerRequestParams; result: PhoneActionResult }
+  /** Read the current Android accessibility node list. */
+  'phone.screen': { params: ServerRequestParams; result: PhoneScreenResult }
+  /** Capture a JPEG image of the phone screen. */
+  'phone.screenshot': { params: ServerRequestParams; result: PhoneScreenshotResult }
+  /** Swipe from a node center by signed pixel deltas. */
+  'phone.swipe': { params: PhoneSwipeParams; result: PhoneActionResult }
+  /** Tap a node by its index from the latest phone_screen. */
+  'phone.tap': { params: PhoneNodeParams; result: PhoneActionResult }
+  /** Replace the text of an editable node from the latest phone_screen. */
+  'phone.type': { params: PhoneTypeParams; result: PhoneActionResult }
   /** Click / type / scroll / annotate inside the in-app browser preview. */
   'preview.act': { params: PreviewActRequestParams; result: ValueResult }
   /** Read the in-app browser preview's text (JSON text answer). */
@@ -7256,6 +7305,12 @@ export const SERVER_REQUEST_METHODS = [
   'approval',
   'clarify',
   'display.install.sudo',
+  'phone.back',
+  'phone.screen',
+  'phone.screenshot',
+  'phone.swipe',
+  'phone.tap',
+  'phone.type',
   'preview.act',
   'preview.read',
   'secret',
