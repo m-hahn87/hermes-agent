@@ -411,7 +411,8 @@ async def test_retired_origin_cannot_act_from_a_copied_context(tmp_path, monkeyp
         return "ok"
 
     authority = await _authority(tmp_path, monkeypatch, answer)
-    conn = _connection(authority, _Socket(dict(_IDENTITY)))
+    sock = _Socket(dict(_IDENTITY))
+    conn = _connection(authority, sock)
     monkeypatch.setattr(phone_control, "PHONE_ACTIONS_TIMEOUT_S", 0.05)
     try:
         await _submitted(authority, conn)
@@ -425,8 +426,10 @@ async def test_retired_origin_cannot_act_from_a_copied_context(tmp_path, monkeyp
         finally:
             session_ingress.release_native_turn_origin(token)
         # The copy still holds the object the drained turn used; it must no longer be usable.
+        frames_before = len(sock.frames)
         context.run(lambda: seen.update(result=phone_control.phone_actions({"operation": "list"})))
         assert json.loads(seen["result"]) == {"status": "unavailable"}
+        assert len(sock.frames) == frames_before, "a retired origin must not even reach the wire"
     finally:
         await _stop_drain(authority)
         await conn.close()
@@ -442,7 +445,7 @@ async def test_a_terminal_replay_never_rearms_the_origin(tmp_path, monkeypatch):
     ref = SessionRef("p", _SID)
     terminal = AdmissionReceipt("adm-done", ref, 7, "terminal", "done", 1, 1)
     conn.remember_native_turn_origin(terminal, ref)
-    assert session_ingress.claim_native_turn_origin(authority, ref, _row_of("adm-done")) is not None or True
+    # Nothing was armed by the terminal receipt, so the (single) claim binds nothing.
     token = session_ingress.claim_native_turn_origin(authority, ref, _row_of("adm-done"))
     try:
         assert current_native_turn_origin() is None, "a terminal replay must not arm an origin"

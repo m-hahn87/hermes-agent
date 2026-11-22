@@ -432,13 +432,15 @@ async def execute_admission(authority, ref, row):
             await _hand_over_turn_marker(authority, row['admission_id'], event)
             return response
     finally:
+        # First statement: a cancelled drain (shutdown, Stop) skips everything after the raisable
+        # awaits below, and an unretired origin would stay armed in this long-lived task.
+        release_native_turn_origin(origin_token)
         if not native:
             # No adapter task awaits this turn to run its post-delivery callbacks: the drain runs them
             # once the turn settled and its reply went out (``fire_post_delivery``).
             _take_post_delivery(authority, row['admission_id'], event.source, route)
         if not handed:
             await _release_turn_marker(authority, event)
-        release_native_turn_origin(origin_token)
         executing_admission.reset(token)
         execution_result.reset(result_token)
         api_execution.reset(api_token)
