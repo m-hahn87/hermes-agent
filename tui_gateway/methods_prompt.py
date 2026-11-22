@@ -688,7 +688,7 @@ def _persist_session_row_for_submit(rid, session, text=None, display_kind=None):
 
 def _run_after_agent_ready(
     rid, sid, session, text, display_kind, display_metadata, hosted_terminal_callback, turn_author=None,
-    hosted_images=None,
+    hosted_images=None, turn_origin=None,
 ):
     """Turn thread body: patient wait for a deferred build (a slow build must not eat the
     accepted in-flight message), then run."""
@@ -719,7 +719,8 @@ def _run_after_agent_ready(
             return
     _run_prompt_submit(
         rid, sid, session, text, display_kind=display_kind, display_metadata=display_metadata,
-        image_paths=hosted_images, terminal_callback=hosted_terminal_callback, turn_author=turn_author)
+        image_paths=hosted_images, terminal_callback=hosted_terminal_callback, turn_author=turn_author,
+        origin_transport=turn_origin)
 
 
 _TRUNCATION_PARAMS = (
@@ -917,10 +918,15 @@ def _(rid, params: dict) -> dict:
     # Re-bind to the current transport: streaming must stay on the active websocket even
     # if a disconnect/fallback moved the session to stdio. Through _rebind_live_transport so a
     # socket that already closed cannot cancel the orphan reap without coming back (#116464).
+    # The one socket that submitted this exact turn. ContextVars do not follow the worker thread
+    # below, so capture it here and hand it to the dispatch explicitly; a queued/synthesized turn
+    # must never inherit it (see session_auto_continue._drain_queued_prompt).
+    turn_origin = None
     with _session_resume_lock:
         if (refusal := _reattach_refusal(rid, sid, session)) is not None:
             return refusal
         if (t := current_transport()) is not None:
+            turn_origin = t
             _rebind_live_transport(sid, session, t)
     # Claim the turn against a possibly-running session (busy/queued reply, else fall
     # through once ``running`` is observed False).  The provider interrupt happens after
@@ -1002,7 +1008,7 @@ def _(rid, params: dict) -> dict:
     run_thread = threading.Thread(
         target=lambda: _run_after_agent_ready(
             rid, sid, session, text, display_kind, display_metadata, hosted_terminal_callback, turn_author,
-            hosted_images),
+            hosted_images, turn_origin),
         daemon=True, name=f"prompt-submit-{sid}")
     # Handle lets session.interrupt tell a live turn from a stuck `running` flag.
     session["_run_thread"] = run_thread

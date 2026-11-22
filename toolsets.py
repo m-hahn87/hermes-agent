@@ -33,6 +33,11 @@ _HERMES_CORE_TOOLS = [
     "computer_use",
     # Service-gated connector account status and authorization links.
     "manage_connections",
+    # Conduit phone-control bridge (server-request tools): productive only when a
+    # phone-capability client (Conduit Android) is attached to the session.
+    "phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot",
+    # Native actions v1 (list/run): one tool, gated on the turn's own authenticated socket.
+    "phone_actions",
 ]
 
 # Webhook payloads are untrusted third-party content: no file/system execution.
@@ -168,6 +173,16 @@ TOOLSETS = {
     # Scenario-specific toolsets
     "debugging": _ts("Debugging and troubleshooting toolkit", ["terminal", "process_manage"], includes=["web", "file"]),
     "safe": _ts("Safe toolkit without terminal access", [], includes=["web", "vision", "image_gen"]),
+    # Conduit phone-control bridge: server->client requests to the Android app. Only productive
+    # while a phone-capability client (Conduit, ``phone_control: true``) is attached; without one
+    # every tool answers "Kein Conduit-Client ..." instead of failing the turn. This needs its own
+    # TOOLSETS entry (not just the names in ``_HERMES_CORE_TOOLS``): a platform list that expands a
+    # composite keeps only CONFIGURABLE_TOOLSETS, so bare registry toolsets get dropped.
+    "phone_control": _ts(
+        "Conduit phone control (Android Accessibility): screen snapshot, tap, type, swipe, back, screenshot",
+        ["phone_screen", "phone_tap", "phone_type", "phone_swipe", "phone_back", "phone_screenshot",
+         "phone_actions"],
+    ),
 
     # Coding posture, auto-selected in a code workspace (agent/coding_context.py).
     # `desktop_ui` is folded in separately by the GUI gateway for desktop sessions.

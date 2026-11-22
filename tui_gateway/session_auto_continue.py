@@ -507,6 +507,11 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
     dispatch_failed = False
     try:
         if not use_compute_host:
+            # A queued prompt is replayed after its original submit returned. Its queued transport
+            # is routing history, not proof that the submitting client is still the authenticated
+            # origin of THIS admitted turn (the socket may have reconnected, or the queue may have
+            # been merged/steered/replaced). Native-action authority therefore stays absent and
+            # phone_actions fails closed; the queued text still runs.
             _run_prompt_submit(rid, sid, session, queued["text"], **kwargs, **author_kwargs)
         elif (resp := _submit_prompt_to_compute_host(rid, sid, session, queued["text"], **kwargs)).get("error"):
             with session["history_lock"]:

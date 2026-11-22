@@ -536,6 +536,16 @@ def _(rid, params: dict) -> dict:
     # than the field refuses only that call and keeps the ``server_requests`` it already accepted.
     if "server_requests" in params:
         server_requests.advertise(transport, bool(params.get("server_requests")))
+    if "phone_control" in params:
+        server_requests.advertise_phone(transport, bool(params.get("phone_control")))
+    if "phone_actions_version" in params:
+        # Native actions v1 require a server-authenticated socket: a label in params can never
+        # stand in for the WS-upgrade identity. An unauthenticated socket registers nothing.
+        from gateway.session_identity import is_authenticated_identity
+        if is_authenticated_identity(getattr(transport, "auth_identity", None)):
+            server_requests.advertise_phone_actions(transport, params.get("phone_actions_version"))
+        else:
+            server_requests.advertise_phone_actions(transport, None)
     if "desktop_local" in params and hasattr(transport, "auth_identity"):
         transport.desktop_local = local_desktop_client(transport.auth_identity, params.get("desktop_local"))
         if transport.desktop_local:

@@ -55,7 +55,8 @@ from tui_gateway.user_messages import (
     AGENT_BUILD_ABANDONED, AGENT_MISSING_FOR_TURN, AGENT_STILL_STARTING, agent_init_failed_message, busy_message,
     resume_failed_message, turn_error_text)
 from tui_gateway.transport import (FanoutTransport, StdioTransport, Transport, bind_transport,
-                                   current_transport, reset_transport)
+                                   bind_turn_origin, current_transport, reset_transport,
+                                   reset_turn_origin)
 from hermes_cli._startup_fast import project_root_str
 
 logger = logging.getLogger(__name__)
@@ -589,7 +590,8 @@ from tui_gateway import server_requests as _server_requests
 
 _server_requests.bind_sinks(lambda frame: write_json(frame), lambda event, sid, payload: _emit(event, sid, payload),
                             lambda sid: _session_client_answers_requests(sid),
-                            lambda sid: _session_answering_clients(sid))
+                            lambda sid: _session_answering_clients(sid),
+                            lambda event, sid, payload: _event_frame(event, sid, payload))
 
 
 # Live WS peer transports (maintained by tui_gateway.ws): the only route for session-less background

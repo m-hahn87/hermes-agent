@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from .base import Params, Result
 from .registry import method
 
@@ -31,6 +33,15 @@ class ClientCapabilitiesParams(Params):
     #: error for methods it has no handler for. A WebSocket client that never says so is treated as a
     #: build older than server→client requests and every such request fails fast for it.
     server_requests: bool = False
+    #: The client controls the user's phone (Conduit Android with its Accessibility service). Backends pin
+    #: every ``phone.*`` server→client request to a connection that advertised this, so a Desktop window
+    #: attached to the same session can never answer a phone request with a method-not-found error.
+    phone_control: bool = False
+    #: The client registered the native-actions protocol after seeing ``phone.actions.list`` /
+    #: ``phone.actions.run`` in this backend's ``server_requests``. Only the exact integer 1 is valid;
+    #: registration is per socket and revoked on disconnect. The tool still requires the turn's own
+    #: authenticated originating socket, never the newest connected phone.
+    phone_actions_version: Literal[1] | None = None
     #: The client is the Desktop app connected to a backend on its own machine (its connection mode is
     #: local). Counted only on a connection that redeemed a native ticket minted over this machine's
     #: private control socket; it is what makes the welcome trial and first-run onboarding available
