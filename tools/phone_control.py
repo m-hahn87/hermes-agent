@@ -255,6 +255,8 @@ def _actions_origin() -> tuple[object | None, str | None]:
     if admitted is not None:
         origin = admitted.transport
         refusal = "admitted turn origin unbound" if origin is None else None
+        if refusal is None and admitted.revoked:
+            refusal = "admitted turn origin retired"  # a copied context outliving its turn
     else:
         origin, refusal = turn_origin_transport(), None
         if origin is None:

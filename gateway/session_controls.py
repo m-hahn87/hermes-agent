@@ -790,6 +790,8 @@ class AuthorityConnection:
         from gateway.session_identity import is_authenticated_identity
         if not is_authenticated_identity(getattr(self.transport, 'auth_identity', None)):
             return
+        if receipt.status not in {'queued', 'started'}:
+            return  # an already-terminal replay must never re-arm a spent admission id
         from gateway.native_turn_origin import NativeTurnOrigin, register_native_turn_origin
         register_native_turn_origin(self.authority, NativeTurnOrigin(
             principal=self.actor.subject, profile_id=ref.profile_id,

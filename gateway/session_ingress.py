@@ -339,7 +339,6 @@ async def execute_admission(authority, ref, row):
     # admission an authenticated dashboard socket submitted. A managed (out-of-process) worker, a
     # queued drain, a recovered/replayed turn or any synthesized input claims nothing and fails
     # closed in phone_actions. One-shot: claiming removes the entry.
-    origin_token = claim_native_turn_origin(authority, ref, row)
     live = authority.sessions[ref.session_id]
     # The key the turn registers its post-delivery slot under; a rebind mid-turn must not move the take.
     route = live.route
@@ -383,6 +382,9 @@ async def execute_admission(authority, ref, row):
     # This drain, not the handler's unwind, releases the turn's crash marker (see below).
     event._turn_marker_handoff = True
     handed = False
+    # Claimed last, immediately before the try whose finally releases it: no fallible preparation
+    # between the claim and its release can strand a bound origin in this long-lived drain task.
+    origin_token = claim_native_turn_origin(authority, ref, row)
     try:
         async with _admission_scope(authority, home, row, event, captured):
             if is_api:

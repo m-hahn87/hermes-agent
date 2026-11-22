@@ -25,7 +25,7 @@ reaches the claim.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import threading
 import time
 from typing import Any
@@ -37,6 +37,15 @@ ORIGIN_TTL_S = 120.0
 _REGISTRY_ATTR = "_native_turn_origins"
 
 
+class _Lifecycle:
+    """Mutable, in-process lifecycle of one origin; frozen dataclass fields stay immutable."""
+
+    __slots__ = ("revoked",)
+
+    def __init__(self) -> None:
+        self.revoked = False
+
+
 @dataclass(frozen=True)
 class NativeTurnOrigin:
     """Server-attested association for one admitted dashboard turn. Never serialized."""
@@ -46,6 +55,11 @@ class NativeTurnOrigin:
     session_id: str
     admission_id: str
     transport: Any  # the negotiated authenticated socket; in-process only
+    lifecycle: _Lifecycle = field(default_factory=_Lifecycle)
+
+    @property
+    def revoked(self) -> bool:
+        return self.lifecycle.revoked
 
 
 _current_origin: ContextVar[NativeTurnOrigin | None] = ContextVar(
@@ -116,6 +130,15 @@ def bind_native_turn_origin(origin: NativeTurnOrigin | None):
 
 
 def reset_native_turn_origin(token) -> None:
+    """Unbind the executing turn and retire the origin object itself.
+
+    A task or subagent created during the turn keeps a COPY of the context and would otherwise keep
+    reading the (spent) origin after the turn ended. Retiring the object makes every such copy fail
+    closed, so no post-turn work can act as the user's phone lease.
+    """
+    origin = _current_origin.get()
+    if origin is not None:
+        origin.lifecycle.revoked = True
     _current_origin.reset(token)
 
 
