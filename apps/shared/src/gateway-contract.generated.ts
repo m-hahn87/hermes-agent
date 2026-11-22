@@ -1997,9 +1997,11 @@ export interface PingResult {
 }
 export interface GatewayCapabilitiesResult {
   per_session_exclusive_submit: boolean
+  session_client_v1?: boolean
 }
 export interface ClientCapabilitiesParams {
   server_requests?: boolean
+  phone_control?: boolean
   desktop_local?: boolean
 }
 export interface ClientCapabilitiesResult {
@@ -3170,6 +3172,7 @@ export interface SessionCreateParams {
   profile?: string | null
   cols?: number | null
   source?: string | null
+  client?: Record<string, unknown> | null
   cwd?: string | null
   cwd_explicit?: boolean | null
   messages?: SeedMessage[] | null

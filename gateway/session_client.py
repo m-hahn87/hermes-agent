@@ -38,3 +38,72 @@ def policy_client(policy) -> dict | None:
     except (AttributeError, TypeError, ValueError):
         return None
     return dict(value) if client_problem(value) is None else None
+
+
+def store_client(db, session_id: str, client: dict) -> None:
+    """Record the first creator declaration without modifying routing state."""
+    if problem := client_problem(client):
+        raise ValueError(problem)
+
+    def write(conn):
+        conn.execute('CREATE TABLE IF NOT EXISTS session_creator_clients '
+                     '(session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, client_json TEXT NOT NULL)')
+        conn.execute('INSERT OR IGNORE INTO session_creator_clients VALUES (?, ?)',
+                     (session_id, json.dumps(client, separators=(',', ':'))))
+    db._execute_write(write)
+
+
+def stored_clients(db, session_ids) -> dict:
+    """Read declarations from the sidecar; pre-feature databases have no table."""
+    ids = list(dict.fromkeys(s for s in session_ids if s))
+    if not ids:
+        return {}
+    found = {}
+    if db._read_one("SELECT name FROM sqlite_master WHERE type='table' AND name='session_creator_clients'"):
+        for start in range(0, len(ids), 500):
+            batch = ids[start:start + 500]
+            marks = ','.join('?' for _ in batch)
+            for row in db._read_all(f'SELECT session_id, client_json FROM session_creator_clients WHERE session_id IN ({marks})', batch):
+                try:
+                    value = json.loads(row['client_json'])
+                except (TypeError, ValueError):
+                    continue
+                if client_problem(value) is None:
+                    found[row['session_id']] = value
+        # A compressed sidecar chat has a new physical id. Only follow the DB's
+        # recognized compression lineage, never a generic parent/chat_id edge.
+        if hasattr(db, 'get_compression_lineage'):
+            for sid in ids:
+                if sid in found:
+                    continue
+                lineage = db.get_compression_lineage(sid)
+                if sid not in lineage or not lineage or lineage[0] == sid:
+                    continue
+                row = db._read_one('SELECT client_json FROM session_creator_clients WHERE session_id=?', (lineage[0],))
+                if row:
+                    try:
+                        value = json.loads(row['client_json'])
+                    except (TypeError, ValueError):
+                        continue
+                    if client_problem(value) is None:
+                        found[sid] = value
+    # Canonical sessions freeze the declaration in the creation receipt. A continuation's
+    # chat_id alone is insufficient evidence: local_lineage_owner checks receipt membership.
+    if hasattr(db, '_read_ctx'):
+        from hermes_state_local import POLICY_PREFIX, local_lineage_owner
+        with db._read_ctx() as conn:
+            for sid in ids:
+                if sid in found:
+                    continue
+                owner = local_lineage_owner(conn, sid)
+                row = conn.execute('SELECT value FROM state_meta WHERE key=?', (POLICY_PREFIX + owner,)).fetchone()
+                if not row:
+                    continue
+                try:
+                    policy = json.loads(row[0])['policy']
+                    value = json.loads(policy['request_json']).get('client')
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    continue
+                if client_problem(value) is None:
+                    found[sid] = value
+    return found

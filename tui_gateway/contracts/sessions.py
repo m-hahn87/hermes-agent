@@ -5,7 +5,7 @@ listing/browsing stored rows, spawn-tree snapshots, event replay and the statele
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from .base import JsonValue, Params, Result, WireEnum
 from .common import (OpenModel, PendingApproval, ProfileParams, SessionLiveInfo, SessionParams, TranscriptMessage,
@@ -118,6 +118,15 @@ class SeedMessage(Params):
 class SessionCreateParams(ProfileParams):
     cols: int | None = None
     source: str | None = None
+    client: dict[str, JsonValue] | None = None
+
+    @field_validator('client', mode='before')
+    @classmethod
+    def validate_client(cls, value):
+        from gateway.session_client import client_problem
+        if problem := client_problem(value):
+            raise ValueError(problem)
+        return value
     cwd: str | None = None
     # #52589: provenance for ``cwd`` — true only for a deliberate workspace pick;
     # an inherited app-global workspace must yield to a named profile's terminal.cwd.

@@ -226,7 +226,11 @@ def get_sessions(
             total = db.session_count(exclude_children=True, **scope)
             now = time.time()
             row_profile = profile_name or _cron_default_profile()
+            from gateway.session_client import stored_clients
+            clients = stored_clients(db, [s.get('id') for s in sessions])
             for s in sessions:
+                if client := clients.get(s.get('id')):
+                    s['creator_client'] = client
                 s["is_active"] = _is_active(s, now)
                 s["profile"] = row_profile
                 s["is_default_profile"] = row_profile == "default"
@@ -392,6 +396,9 @@ async def search_sessions(
                         "archived": bool(row.get("archived"))})
                 else:
                     payload["id"] = sid
+                from gateway.session_client import stored_clients
+                if client := stored_clients(db, [sid]).get(sid):
+                    payload['creator_client'] = client
                 seen[root] = payload
 
             def hit_payload(row: dict, snippet: str, role, session_started) -> dict:
@@ -564,6 +571,9 @@ async def get_session_detail(session_id: str, profile: Optional[str] = None):
         session = db.get_session(sid) if sid else None
         if not session:
             raise HTTPException(status_code=404, detail=_NOT_FOUND)
+        from gateway.session_client import stored_clients
+        if client := stored_clients(db, [sid]).get(sid):
+            session['creator_client'] = client
         # Always stamp the owner: unowned default-profile rows made multi-profile
         # clients resolve them to whichever gateway happened to be active.
         session["profile"] = _serving_profile(profile)

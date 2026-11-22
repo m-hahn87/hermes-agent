@@ -17,6 +17,9 @@ class _FakeSessionDB:
     opened_read_only = None
     requested_fields = None
 
+    def _read_one(self, sql, params=()):
+        return None  # this fake models a database predating creator metadata
+
     def __init__(self, *args, **kwargs):
         type(self).opened_read_only = kwargs.get("read_only")
 

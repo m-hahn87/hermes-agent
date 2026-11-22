@@ -229,7 +229,7 @@ def _billing_pending_change(result: dict) -> dict:
 # ── session.create / list / most_recent / facts ──────────────────────
 def _persist_branch(db, new_key: str, parent_key: str, title: str, history: list, *, source, cwd, profile_name,
                     model: str, copy_fields=(), compensate: bool = False, title_source: str = "user",
-                    user_id: str | None = None) -> None:
+                    user_id: str | None = None, creator_client: dict | None = None) -> None:
     """Branch child row + parent transcript (bounded-chunk transactions) + title. ``_branched_from`` keeps the
     row visible in list_sessions_rich() (the live parent never matches the legacy end_reason='branched'
     heuristic); NULL ``profile_name`` rows drop out of profile-keyed sidebar matching / deep links. ``compensate``
@@ -264,6 +264,9 @@ def _persist_branch(db, new_key: str, parent_key: str, title: str, history: list
             db.set_session_title(new_key, title)
         else:
             db.set_auto_title(new_key, title, source=title_source)
+        if creator_client:
+            from gateway.session_client import store_client
+            store_client(db, new_key, creator_client)
         sync_flushed_message_markers(history, rows)
     except Exception as exc:
         from hermes_state_errors import is_disk_full_error
@@ -286,7 +289,8 @@ def _seed_branch_row(record: dict, key: str, parent_session_id: str, history: li
             _persist_branch(db, key, parent_session_id, _branch_title(db, parent_session_id), history,
                             source=source, cwd=None if _is_remote_launch_cwd(record) else record["cwd"],
                             profile_name=profile_name_for_home(profile_home) or _current_profile_name(),
-                            model=_session_default_route(record)[0], compensate=True, title_source="derived", user_id=_session_auth_user_id(record))
+                            model=_session_default_route(record)[0], compensate=True, title_source="derived", user_id=_session_auth_user_id(record),
+                            creator_client=record.get("creator_client"))
             record["pending_title"] = None
             # The first submit's _persist_branch_seed is the fallback for a failed seed, not a second copy.
             record["_branch_seed_persisted"] = True
@@ -325,6 +329,9 @@ def _seed_row(record: dict) -> None:
 def _create_session(rid, params: dict, *, copy_parent_history: bool = False) -> dict:
     """``session.create``; ``copy_parent_history`` (``session.branch_stored``) reads the parent's
     transcript server-side and omits it from the reply."""
+    from gateway.session_client import client_problem
+    if 'client' in params and (problem := client_problem(params['client'])):
+        return _err(rid, -32602, f"invalid client: {problem}")
     # ``profile`` (app-global remote mode): stored so the build and every turn re-bind HERMES_HOME.
     profile_home = _profile_home(profile := (params.get("profile") or "").strip() or None)
     # Reject an incoherent model×provider pair BEFORE any state exists: minting it only defers the
@@ -423,6 +430,7 @@ def _create_session(rid, params: dict, *, copy_parent_history: bool = False) -> 
             "parent_session_id": parent_session_id, "pending_title": _str_param(params, "title") or None,
             "pending_hidden": _flag(params, "hidden"), "room_plumbing": _flag(params, "room_plumbing"),
             "follow_profile_config": _flag(params, "follow_profile_config"),
+            "creator_client": params.get("client"),
             "profile_home": str(profile_home) if profile_home is not None else None,
             "running": False, "session_key": key, "show_reasoning": _load_show_reasoning(), "source": source,
             "slash_worker": None, "tool_progress_mode": _load_tool_progress_mode(), "tool_started_at": {},
