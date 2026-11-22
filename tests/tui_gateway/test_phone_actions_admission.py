@@ -423,6 +423,9 @@ async def test_retired_origin_cannot_act_from_a_copied_context(tmp_path, monkeyp
         context = contextvars.copy_context()
         try:
             assert current_native_turn_origin() is not None
+            # The copy really holds the bound origin, so the refusal below can only be the
+            # retirement — not a missing binding.
+            assert context.run(current_native_turn_origin) is not None
         finally:
             session_ingress.release_native_turn_origin(token)
         # The copy still holds the object the drained turn used; it must no longer be usable.
