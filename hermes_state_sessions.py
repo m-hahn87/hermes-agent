@@ -418,13 +418,14 @@ class SessionSessionsMixin:
                 raise ValueError(problem)
 
         def insert(conn):
-            existed = conn.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone()
             insert_session_row_in_transaction(self, conn, **params)
-            if creator_client is not None and not existed:
+            if creator_client is not None:
                 import json
                 conn.execute('CREATE TABLE IF NOT EXISTS session_creator_clients '
                              '(session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, client_json TEXT NOT NULL)')
-                conn.execute('INSERT INTO session_creator_clients VALUES (?, ?)',
+                # First declaration wins. The row may already exist (resume of a never-persisted key,
+                # the agent's own lazy create), and dropping the label then would silently lose it.
+                conn.execute('INSERT OR IGNORE INTO session_creator_clients VALUES (?, ?)',
                              (session_id, json.dumps(creator_client, separators=(',', ':'))))
         self._execute_write(insert, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
 

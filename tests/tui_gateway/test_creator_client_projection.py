@@ -271,3 +271,18 @@ def test_profile_aggregate_includes_declared_creator(tmp_path, monkeypatch):
         assert rows[0]['source'] == 'desktop'
     finally:
         db.close()
+
+
+def test_creator_is_kept_when_the_row_already_existed(tmp_path):
+    """A draft resumed before its first prompt has a row already; the label must still land."""
+    from gateway.session_client import stored_clients
+    db = SessionDB(tmp_path / "resumed.db")
+    db.create_session("draft", source="desktop")
+    db.create_session("draft", source="desktop", creator_client={"name": "conduit"})
+    try:
+        assert stored_clients(db, ["draft"]) == {"draft": {"name": "conduit"}}
+        # First declaration wins; a later writer cannot rewrite the label.
+        db.create_session("draft", source="desktop", creator_client={"name": "android"})
+        assert stored_clients(db, ["draft"]) == {"draft": {"name": "conduit"}}
+    finally:
+        db.close()
