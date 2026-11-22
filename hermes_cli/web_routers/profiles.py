@@ -452,6 +452,15 @@ def _csv_list(value: Optional[str]) -> list[str]:
     return [s.strip() for s in (value or "").split(",") if s.strip()]
 
 
+def _project_creator_clients(db, rows):
+    from gateway.session_client import stored_clients
+    clients = stored_clients(db, [row.get("id") for row in rows])
+    for row in rows:
+        if client := clients.get(row.get("id")):
+            row["creator_client"] = client
+    return rows
+
+
 @sessions_router.get("/api/profiles/sessions")
 def get_profiles_sessions(
     # ``le=500`` caps the page size — this endpoint fans out across EVERY profile's state.db.
@@ -499,6 +508,7 @@ def get_profiles_sessions(
                 limit=per_profile, offset=0, order_by_last_active=order == "recent",
                 # Same SQL-level blob skip as /api/sessions.
                 compact_rows=not full, include_pinned=True, **scoped)
+            _project_creator_clients(db, rows)
             totals[name] = db.session_count(exclude_children=True, **scoped)
             merged.extend(_tag_rows(rows, name, now))
         _read_profile_db(name, home, errors, _read)
@@ -569,6 +579,8 @@ def get_profiles_sessions_sidebar(
         # page, and a total that shrank when you scrolled would be worse than no total at all.
         slices = {"recents": _slice(db, "recents", recents_subagents), "usage": db.usage_totals(),
                   "cron": _slice(db, "cron"), "messaging": _slice(db, "messaging")}
+        for key in ("recents", "cron", "messaging"):
+            _project_creator_clients(db, slices[key])
         _sidebar_profile_cache_put(cache_key, slices)
         return slices
 

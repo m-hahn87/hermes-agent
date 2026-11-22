@@ -92,6 +92,8 @@ def stored_clients(db, session_ids) -> dict:
     if hasattr(db, '_read_ctx'):
         from hermes_state_local import POLICY_PREFIX, local_lineage_owner
         with db._read_ctx() as conn:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='state_meta'").fetchone():
+                return found
             for sid in ids:
                 if sid in found:
                     continue

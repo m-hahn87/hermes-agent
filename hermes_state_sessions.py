@@ -374,7 +374,7 @@ class SessionSessionsMixin:
         chat_id: str | None = None, chat_type: str | None = None, thread_id: str | None = None,
         parent_session_id: str | None = None, cwd: str | None = None, profile_name: Optional[str] = None,
         git_repo_root: str | None = None, origin_json: str | None = None, display_name: str | None = None,
-        transport_profile: Optional[str] = None,
+        transport_profile: Optional[str] = None, creator_client: dict | None = None,
     ) -> None:
         """Upsert a session row, never overwriting what an earlier writer set (the gateway creates a
         bare row before create_session carries the real model/prompt) — the one exception is the
@@ -412,8 +412,21 @@ class SessionSessionsMixin:
                       parent_session_id=parent_session_id, cwd=cwd, profile_name=profile_name,
                       git_repo_root=git_repo_root, origin_json=origin_json, display_name=display_name,
                       transport_profile=transport_profile)
-        self._execute_write(lambda conn: insert_session_row_in_transaction(self, conn, **params),
-                            patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
+        if creator_client is not None:
+            from gateway.session_client import client_problem
+            if problem := client_problem(creator_client):
+                raise ValueError(problem)
+
+        def insert(conn):
+            existed = conn.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone()
+            insert_session_row_in_transaction(self, conn, **params)
+            if creator_client is not None and not existed:
+                import json
+                conn.execute('CREATE TABLE IF NOT EXISTS session_creator_clients '
+                             '(session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, client_json TEXT NOT NULL)')
+                conn.execute('INSERT INTO session_creator_clients VALUES (?, ?)',
+                             (session_id, json.dumps(creator_client, separators=(',', ':'))))
+        self._execute_write(insert, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
 
     def create_session(self, session_id: str, source: str, **kwargs) -> str:
         """Create (upsert) a session record. Returns the session_id."""

@@ -248,7 +248,7 @@ def _persist_branch(db, new_key: str, parent_key: str, title: str, history: list
         logger.debug("branch: parent system prompt read failed for %s", parent_key, exc_info=True)
     db.create_session(new_key, source=source, model=model, model_config={"_branched_from": parent_key},
                       parent_session_id=parent_key, cwd=cwd, profile_name=profile_name, user_id=user_id,
-                      system_prompt=parent_prompt or None)
+                      system_prompt=parent_prompt or None, creator_client=creator_client)
     try:
         # Compensation guard (#93959 review): if the transcript copy or title write fails AFTER the row
         # committed, the durable-but-empty row would defeat the lazy first-prompt fallback
@@ -264,9 +264,6 @@ def _persist_branch(db, new_key: str, parent_key: str, title: str, history: list
             db.set_session_title(new_key, title)
         else:
             db.set_auto_title(new_key, title, source=title_source)
-        if creator_client:
-            from gateway.session_client import store_client
-            store_client(db, new_key, creator_client)
         sync_flushed_message_markers(history, rows)
     except Exception as exc:
         from hermes_state_errors import is_disk_full_error

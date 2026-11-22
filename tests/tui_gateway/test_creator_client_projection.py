@@ -225,3 +225,49 @@ def test_rest_list_detail_and_search_project_label(tmp_path, monkeypatch):
         assert detail['source'] == 'desktop'
     finally:
         db.close()
+
+
+def test_pre_canonical_read_only_database_projects_legacy_sessions(tmp_path):
+    from gateway.session_client import stored_clients
+    db = SessionDB(tmp_path / "old.db")
+    db.create_session("old", source="desktop")
+    db._execute_write(lambda conn: conn.execute("DROP TABLE state_meta"))
+    db.close()
+    reader = SessionDB(tmp_path / "old.db", read_only=True)
+    try:
+        assert stored_clients(reader, ["old"]) == {}
+    finally:
+        reader.close()
+
+
+def test_creator_insert_failure_rolls_back_session(tmp_path):
+    import sqlite3
+    from gateway.session_client import stored_clients
+    db = SessionDB(tmp_path / "atomic.db")
+    db._execute_write(lambda conn: conn.execute("CREATE TABLE session_creator_clients (session_id TEXT PRIMARY KEY, client_json TEXT NOT NULL)"))
+    db._execute_write(lambda conn: conn.execute("CREATE TRIGGER deny_creator BEFORE INSERT ON session_creator_clients BEGIN SELECT RAISE(ABORT, 'failure'); END"))
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            db.create_session("new", source="desktop", creator_client={"name": "conduit"})
+        assert db.get_session("new") is None
+        assert stored_clients(db, ["new"]) == {}
+    finally:
+        db.close()
+
+
+def test_profile_aggregate_includes_declared_creator(tmp_path, monkeypatch):
+    from gateway.session_client import store_client
+    from hermes_cli.web_routers import profiles
+    db = SessionDB(tmp_path / 'profiles.db')
+    db.create_session('one', source='desktop')
+    store_client(db, 'one', {'name': 'conduit'})
+    monkeypatch.setattr(profiles, '_profile_targets', lambda *a: [('default', tmp_path)])
+    monkeypatch.setattr(profiles, '_read_profile_db', lambda name, home, errors, fn: fn(db))
+    monkeypatch.setattr(profiles, '_corrupt_profile_stores', lambda targets: {})
+    monkeypatch.setattr(profiles, 'subagent_listing_scope', lambda *a, **kw: (False, None))
+    try:
+        rows = profiles.get_profiles_sessions(limit=20, offset=0)['sessions']
+        assert rows[0]['creator_client'] == {'name': 'conduit'}
+        assert rows[0]['source'] == 'desktop'
+    finally:
+        db.close()

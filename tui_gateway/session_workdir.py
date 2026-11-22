@@ -627,10 +627,8 @@ def _ensure_session_db_row(session: dict) -> bool:
                 # #94724 legacy-owner backfill exists to repair, and rows minted AFTER that one-shot
                 # backfill ran stayed NULL forever: profile-keyed matching then drops them from the sidebar
                 # and deep links can't resolve them (#99222).
-                profile_name=profile_name_for_home(profile_home) or _current_profile_name())
-            if client := session.get("creator_client"):
-                from gateway.session_client import store_client
-                store_client(db, key, client)
+                profile_name=profile_name_for_home(profile_home) or _current_profile_name(),
+                creator_client=session.get("creator_client"))
             # Born hidden (session.create hidden=true, or set_hidden before the row existed): apply the deferred intent.
             if session.get("pending_hidden"):
                 try:
