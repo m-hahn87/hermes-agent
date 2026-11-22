@@ -217,6 +217,52 @@ class WSTransport:
             _log.warning("ws write failed peer=%s error_type=%s error=%s", self._peer, type(exc).__name__, exc)
             return False
 
+    def write_bounded(self, obj: dict, deadline: float) -> bool | None:
+        """Send one frame under an absolute monotonic *deadline*.
+
+        Unlike :meth:`write`, this never lets a call that missed its budget enqueue a frame that
+        would start on the wire later. The deadline is re-checked immediately before the enqueue
+        (under the same lock that fixes wire order) and the wait for the scheduled send is bounded
+        by what remains. Returns ``False`` ONLY when the frame provably never entered the writer
+        (expired budget, closed transport, no loop). Once enqueued, a timeout is ``None``
+        (uncertain — the frame may still go out) and never a false "unsent". A streaming token is
+        never routed here: native-action requests are ordinary request frames.
+        """
+        if self._closed:
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        line = serialize_frame(obj, self._peer, _log)
+        on_loop = self._on_loop()
+        from agent.async_utils import safe_schedule_threadsafe
+        with self._token_lock:
+            if self._closed:
+                return False
+            # Last gate before anything can start on the wire: a delayed caller never queues a
+            # frame past its deadline.
+            if time.monotonic() >= deadline:
+                return False
+            self._pending_tokens.append(line)
+            batch, self._pending_tokens = self._pending_tokens, []
+            if on_loop:
+                self._loop.create_task(self._safe_send_many(batch))
+                return True
+            fut = safe_schedule_threadsafe(self._safe_send_many(batch), self._loop)
+            if fut is None:
+                self._closed = True
+                return False
+        try:
+            fut.result(timeout=max(0.0, deadline - time.monotonic()))
+        except concurrent.futures.TimeoutError:  # builtin TimeoutError on 3.11+
+            _log.warning("ws bounded write deadline exceeded peer=%s — frame already enqueued",
+                         self._peer)
+            return None  # dispatched: the outcome is uncertain, never proven unsent
+        except Exception as exc:
+            _log.warning("ws bounded write failed peer=%s error_type=%s error=%s",
+                         self._peer, type(exc).__name__, exc)
+            return None  # enqueued before the failure: do not claim it never went out
+        return True
+
     def _arm_token_flush(self) -> None:  # loop thread
         if not self._closed:
             self._token_flush_handle = self._loop.call_later(_TOKEN_COALESCE_S, self._flush_tokens)

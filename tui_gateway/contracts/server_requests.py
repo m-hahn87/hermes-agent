@@ -386,3 +386,134 @@ class RequestCancelPayload(Payload):
 
 event("request.cancel", RequestCancelPayload,
       doc="The backend withdrew an open server→client request; clear the matching card only.")
+
+
+# ── phone control (Conduit Android) ───────────────────────────────────────────────────────────
+# The Conduit app answers these only when it advertised ``phone_control``; failure results carry
+# ``{error: {code}}`` (inactive | timeout | unavailable | invalid_params | session_not_open |
+# busy | screen_required | blocked_by_app | secure_window).
+
+
+class PhoneScreenRequestParams(ServerRequestParams):
+    """``phone.screen``: the LLM-friendly node snapshot of the active screen (index-stable)."""
+
+
+class PhoneScreenResult(Result):
+    nodes: list[JsonValue]
+
+
+class PhoneNodeRequestParams(ServerRequestParams):
+    node_index: int = Field(ge=0)
+
+
+class PhoneTypeRequestParams(PhoneNodeRequestParams):
+    text: str
+
+
+class PhoneSwipeRequestParams(PhoneNodeRequestParams):
+    delta_x: int
+    delta_y: int
+
+
+class PhoneBackRequestParams(ServerRequestParams):
+    """``phone.back`` takes no node: a global back action."""
+
+
+class PhoneActionResult(Result):
+    observation: str | None = None  # e.g. "clicked" | "text_set" | "scrolled"
+    error: dict[str, JsonValue] | None = None  # {code: ...} on failure
+
+
+class PhoneScreenshotRequestParams(ServerRequestParams):
+    """``phone.screenshot``: a downscaled JPEG data-URL; blocked secure windows answer an error."""
+
+
+class PhoneScreenshotResult(Result):
+    data_url: str | None = None
+    error: dict[str, JsonValue] | None = None
+
+
+server_request("phone.screen", params=PhoneScreenRequestParams, result=PhoneScreenResult,
+               doc="Conduit phone control: read the active screen as an LLM-friendly node list.")
+server_request("phone.tap", params=PhoneNodeRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: tap the node at node_index from the last phone.screen snapshot.")
+server_request("phone.type", params=PhoneTypeRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: set the text of the editable node at node_index.")
+server_request("phone.swipe", params=PhoneSwipeRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: swipe starting at node_index by delta_x/delta_y pixels.")
+server_request("phone.back", params=PhoneBackRequestParams, result=PhoneActionResult,
+               doc="Conduit phone control: global back action.")
+server_request("phone.screenshot", params=PhoneScreenshotRequestParams, result=PhoneScreenshotResult,
+               doc="Conduit phone control: capture a downscaled screenshot as a data-URL.")
+
+
+# ── native phone actions v1 (Conduit Android) ─────────────────────────────────────────────────
+# Registered separately from ``phone_control``: the app re-sends ``client.capabilities`` with
+# ``phone_actions_version: 1`` only after this backend listed both methods, so an old gateway never
+# sees the key. The tool is bound to the authenticated originating socket of the turn.
+
+
+class PhoneActionsStatus(WireEnum):
+    ok = "ok"
+    handed_off = "handed_off"
+    confirmed = "confirmed"
+    denied = "denied"
+    disabled = "disabled"
+    needs_foreground = "needs_foreground"
+    permission_required = "permission_required"
+    target_unavailable = "target_unavailable"
+    invalid_arguments = "invalid_arguments"
+    cancelled = "cancelled"
+    duplicate = "duplicate"
+    unknown_outcome = "unknown_outcome"
+    unavailable = "unavailable"
+
+
+class PhoneActionsListRequestParams(ServerRequestParams):
+    """``phone.actions.list``: the currently allowed native action ids (metadata only)."""
+
+    version: Literal[1]
+
+
+class PhoneActionId(WireEnum):
+    alarm_set = "alarm.set"
+    timer_set = "timer.set"
+    maps_open = "maps.open"
+
+
+class PhoneActionRef(Result):
+    """One allowed action id; descriptions/schemas are gateway-owned, never client text."""
+
+    id: PhoneActionId
+
+
+class PhoneActionsListResult(Result):
+    """Success EXACTLY ``{status:"ok",version:1,actions:[{id}...]}`` (max 32, known ids).
+    An error answer carries only ``status``. Validation is enforced in tools/phone_control.py too."""
+
+    status: PhoneActionsStatus
+    version: Literal[1] | None = None
+    actions: list[PhoneActionRef] | None = Field(default=None, max_length=32)
+
+
+server_request("phone.actions.list", params=PhoneActionsListRequestParams, result=PhoneActionsListResult,
+               doc="Conduit native actions v1: list the currently allowed action ids (no side effect).")
+
+
+class PhoneActionsRunRequestParams(ServerRequestParams):
+    """``phone.actions.run``: one bounded native action; the request id is the one-shot key."""
+
+    version: Literal[1]
+    action: Literal["alarm.set", "timer.set", "maps.open"]
+    arguments: dict[str, JsonValue]
+
+
+class PhoneActionsRunResult(Result):
+    """Run answers exactly ``{status:...}``; the current adapters can only ``handed_off`` — an
+    ``ok``/``confirmed`` answer or any extra key is an invalid app response (unknown_outcome)."""
+
+    status: PhoneActionsStatus
+
+
+server_request("phone.actions.run", params=PhoneActionsRunRequestParams, result=PhoneActionsRunResult,
+               doc="Conduit native actions v1: run one vetted action after on-device approval. Never retried.")

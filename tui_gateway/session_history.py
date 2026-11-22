@@ -335,14 +335,16 @@ def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: 
             name = tc_name or m.get("tool_name") or "tool"
             args = tc_args or {}
             # `context` is an 80-char preview; ship args so a full-call renderer isn't truncated.
-            labels = _bridged_tool_labels(name, args)
-            messages.append({"role": "tool", "name": name, "context": _tool_ctx(name, args),
+            from agent.display import redact_tool_args_for_display
+            shown_args = redact_tool_args_for_display(name, args) or {}
+            labels = _bridged_tool_labels(name, shown_args)
+            messages.append({"role": "tool", "name": name, "context": _tool_ctx(name, shown_args),
                              # Edit cards and settled clarify cards need the original result; other
                              # tool outputs remain omitted from this compact display projection.
                              **({"content": m.get("content")} if name in {"write_file", "patch", "skill_manage", "clarify"} else {}),
                              **{key: m[key] for key in ("tool_call_id", "timestamp", "display_metadata")
                                 if m.get(key) is not None},
-                             **({"args": args} if args else {}), **({"labels": labels} if labels else {})})
+                             **({"args": shown_args} if shown_args else {}), **({"labels": labels} if labels else {})})
             continue
         # Assistant detail sidecars can carry the only visible reply or reasoning after resume/reload.
         has_assistant_detail = role == "assistant" and any(m.get(key) for key in _HISTORY_ASSISTANT_DETAIL_KEYS)

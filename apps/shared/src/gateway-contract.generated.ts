@@ -2036,6 +2036,8 @@ export interface GatewayCapabilitiesResult {
 }
 export interface ClientCapabilitiesParams {
   server_requests?: boolean
+  phone_control?: boolean
+  phone_actions_version?: 1 | null
   desktop_local?: boolean
 }
 export interface ClientCapabilitiesResult {
@@ -5876,6 +5878,72 @@ export interface ThemeValues {
   mode?: ThemeMode | null
   layout?: string | null
 }
+/** ``phone.screen``: the LLM-friendly node snapshot of the active screen (index-stable). */
+export interface PhoneScreenRequestParams {
+  session_id: string
+}
+export interface PhoneScreenResult {
+  nodes: unknown[]
+}
+export interface PhoneNodeRequestParams {
+  session_id: string
+  node_index: number
+}
+export interface PhoneActionResult {
+  observation?: string | null
+  error?: Record<string, unknown> | null
+}
+export interface PhoneTypeRequestParams {
+  session_id: string
+  node_index: number
+  text: string
+}
+export interface PhoneSwipeRequestParams {
+  session_id: string
+  node_index: number
+  delta_x: number
+  delta_y: number
+}
+/** ``phone.back`` takes no node: a global back action. */
+export interface PhoneBackRequestParams {
+  session_id: string
+}
+/** ``phone.screenshot``: a downscaled JPEG data-URL; blocked secure windows answer an error. */
+export interface PhoneScreenshotRequestParams {
+  session_id: string
+}
+export interface PhoneScreenshotResult {
+  data_url?: string | null
+  error?: Record<string, unknown> | null
+}
+/** ``phone.actions.list``: the currently allowed native action ids (metadata only). */
+export interface PhoneActionsListRequestParams {
+  session_id: string
+  version: 1
+}
+/** Success EXACTLY ``{status:"ok",version:1,actions:[{id}...]}`` (max 32, known ids). An error answer carries only ``status``. Validation is enforced in tools/phone_control.py too. */
+export interface PhoneActionsListResult {
+  status: PhoneActionsStatus
+  version?: 1 | null
+  actions?: PhoneActionRef[] | null
+}
+export type PhoneActionsStatus = 'ok' | 'handed_off' | 'confirmed' | 'denied' | 'disabled' | 'needs_foreground' | 'permission_required' | 'target_unavailable' | 'invalid_arguments' | 'cancelled' | 'duplicate' | 'unknown_outcome' | 'unavailable'
+/** One allowed action id; descriptions/schemas are gateway-owned, never client text. */
+export interface PhoneActionRef {
+  id: PhoneActionId
+}
+export type PhoneActionId = 'alarm.set' | 'timer.set' | 'maps.open'
+/** ``phone.actions.run``: one bounded native action; the request id is the one-shot key. */
+export interface PhoneActionsRunRequestParams {
+  session_id: string
+  version: 1
+  action: 'alarm.set' | 'timer.set' | 'maps.open'
+  arguments: Record<string, unknown>
+}
+/** Run answers exactly ``{status:...}``; the current adapters can only ``handed_off`` — an ``ok``/``confirmed`` answer or any extra key is an invalid app response (unknown_outcome). */
+export interface PhoneActionsRunResult {
+  status: PhoneActionsStatus
+}
 export interface DisplayInstallSudoParams {
   session_id: string
   profile_key: string
@@ -7349,6 +7417,22 @@ export interface ServerRequestMap {
   clarify: { params: ClarifyRequestParams; result: ClarifyResult }
   /** Masked sudo password for the Bot Screen package install; app-level (empty session). */
   'display.install.sudo': { params: DisplayInstallSudoParams; result: ValueResult }
+  /** Conduit native actions v1: list the currently allowed action ids (no side effect). */
+  'phone.actions.list': { params: PhoneActionsListRequestParams; result: PhoneActionsListResult }
+  /** Conduit native actions v1: run one vetted action after on-device approval. Never retried. */
+  'phone.actions.run': { params: PhoneActionsRunRequestParams; result: PhoneActionsRunResult }
+  /** Conduit phone control: global back action. */
+  'phone.back': { params: PhoneBackRequestParams; result: PhoneActionResult }
+  /** Conduit phone control: read the active screen as an LLM-friendly node list. */
+  'phone.screen': { params: PhoneScreenRequestParams; result: PhoneScreenResult }
+  /** Conduit phone control: capture a downscaled screenshot as a data-URL. */
+  'phone.screenshot': { params: PhoneScreenshotRequestParams; result: PhoneScreenshotResult }
+  /** Conduit phone control: swipe starting at node_index by delta_x/delta_y pixels. */
+  'phone.swipe': { params: PhoneSwipeRequestParams; result: PhoneActionResult }
+  /** Conduit phone control: tap the node at node_index from the last phone.screen snapshot. */
+  'phone.tap': { params: PhoneNodeRequestParams; result: PhoneActionResult }
+  /** Conduit phone control: set the text of the editable node at node_index. */
+  'phone.type': { params: PhoneTypeRequestParams; result: PhoneActionResult }
   /** Click / type / scroll / annotate inside the in-app browser preview. */
   'preview.act': { params: PreviewActRequestParams; result: ValueResult }
   /** Read the in-app browser preview's text (JSON text answer). */
@@ -7381,6 +7465,14 @@ export const SERVER_REQUEST_METHODS = [
   'approval',
   'clarify',
   'display.install.sudo',
+  'phone.actions.list',
+  'phone.actions.run',
+  'phone.back',
+  'phone.screen',
+  'phone.screenshot',
+  'phone.swipe',
+  'phone.tap',
+  'phone.type',
   'preview.act',
   'preview.read',
   'secret',

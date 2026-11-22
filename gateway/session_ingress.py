@@ -1,6 +1,7 @@
 """Trusted messaging admission and the existing TurnRunner invocation boundary."""
 import asyncio
 import logging
+import time
 from contextvars import ContextVar
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import replace
@@ -296,6 +297,50 @@ def row_turn_author(policy, row):
     return forward_author(policy)
 
 
+def claim_native_turn_origin(authority, ref, row):
+    """Claim + bind the ephemeral native-action origin of THIS in-process admission.
+
+    The ONE place every redemption condition is re-checked, at the moment the claimed row is
+    executed here:
+
+    * the exact ``admission_id``, ``session_id``, ``profile_id`` and authenticated principal of the
+      row being executed agree with the registration;
+    * the registration is not older than ``ORIGIN_TTL_S``;
+    * the registered socket is still alive (never latched closed) and still carries an
+      authenticated identity at redemption — a dead socket's queued turn fails closed.
+
+    One-shot: the entry is spent whatever the verdict. Managed (out-of-process) workers, recovered,
+    replayed and synthesized turns never reach this call, so they bind nothing.
+    """
+    from gateway.native_turn_origin import (
+        ORIGIN_TTL_S, bind_native_turn_origin, pop_registered_origin)
+    entry = pop_registered_origin(authority, row.get('admission_id'))
+    origin = None
+    if entry is not None:
+        registered_at, candidate = entry
+        if (time.monotonic() - registered_at <= ORIGIN_TTL_S
+                and candidate.admission_id == row.get('admission_id')
+                and candidate.session_id == ref.session_id
+                and candidate.profile_id == ref.profile_id
+                and candidate.principal == row.get('principal_id')
+                and _origin_socket_usable(candidate.transport)):
+            origin = candidate
+    return bind_native_turn_origin(origin)
+
+
+def _origin_socket_usable(transport) -> bool:
+    """The registered socket is still the live, authenticated one that made the submission."""
+    if transport is None or getattr(transport, "_closed", None) is True:
+        return False
+    from gateway.session_identity import is_authenticated_identity
+    return is_authenticated_identity(getattr(transport, "auth_identity", None))
+
+
+def release_native_turn_origin(token) -> None:
+    from gateway.native_turn_origin import reset_native_turn_origin
+    reset_native_turn_origin(token)
+
+
 async def execute_admission(authority, ref, row):
     busy_turn_started(row['admission_id'])
     from gateway.session_completion_notes import note_if_unviewed
@@ -312,6 +357,10 @@ async def execute_admission(authority, ref, row):
     policy = managed_policy(authority, ref)
     if policy is not None:
         return await admit_managed(authority, ref, row, policy)
+    # Native-action provenance is bound only on THIS process's in-process execution of the exact
+    # admission an authenticated dashboard socket submitted. A managed (out-of-process) worker, a
+    # queued drain, a recovered/replayed turn or any synthesized input claims nothing and fails
+    # closed in phone_actions. One-shot: claiming removes the entry.
     live = authority.sessions[ref.session_id]
     # The key the turn registers its post-delivery slot under; a rebind mid-turn must not move the take.
     route = live.route
@@ -362,6 +411,9 @@ async def execute_admission(authority, ref, row):
     # This drain, not the handler's unwind, releases the turn's crash marker (see below).
     event._turn_marker_handoff = True
     handed = False
+    # Claimed last, immediately before the try whose finally releases it: no fallible preparation
+    # between the claim and its release can strand a bound origin in this long-lived drain task.
+    origin_token = claim_native_turn_origin(authority, ref, row)
     try:
         async with _admission_scope(authority, ref, home, row, event, captured):
             if is_api:
@@ -409,6 +461,9 @@ async def execute_admission(authority, ref, row):
             await _hand_over_turn_marker(authority, row['admission_id'], event)
             return response
     finally:
+        # First statement: a cancelled drain (shutdown, Stop) skips everything after the raisable
+        # awaits below, and an unretired origin would stay armed in this long-lived task.
+        release_native_turn_origin(origin_token)
         if not native:
             # No adapter task awaits this turn to run its post-delivery callbacks: the drain runs them
             # once the turn settled and its reply went out (``fire_post_delivery``).

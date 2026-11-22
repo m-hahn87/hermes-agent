@@ -325,9 +325,13 @@ def _read_file_line_label(args: dict) -> str:
 
 
 def redact_tool_args_for_display(tool_name: str, args: dict | None) -> dict | None:
-    """Return a copy of tool args safe for logs/progress UI (masks typed browser secrets)."""
+    """Return a copy of tool args safe for logs/progress UI (masks typed browser secrets and
+    drops native phone-action arguments: only the validated operation/action id is diagnostics)."""
     if not isinstance(args, dict):
         return args
+    if tool_name == "phone_actions":
+        return {key: args[key] for key in ("operation", "action")
+                if isinstance(args.get(key), str)}
     if tool_name == "browser_type" and isinstance(args.get("text"), str):
         return {**args, "text": redact_sensitive_text(args["text"], force=True)}
     if tool_name == "browser_exec" and isinstance(args.get("code"), str):

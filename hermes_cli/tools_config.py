@@ -92,6 +92,7 @@ CONFIGURABLE_TOOLSETS = [
     ("discord",         "💬 Discord (read/participate)", "fetch messages, search members, create thread"),
     ("discord_admin",   "🛡️  Discord Server Admin",    "list channels/roles, pin, assign roles"),
     ("computer_use",     "🖱️  Computer Use (macOS/Windows/Linux)", "background desktop control via cua-driver"),
+    ("phone_control",    "📱 Phone Control (Conduit Android)", "phone_screen, phone_tap, phone_type, phone_swipe, phone_back, phone_screenshot (needs the Conduit app with its Accessibility service)"),
 ]
 
 

@@ -10,8 +10,10 @@ post-turn follow-ups (queued prompt, goal continuation, notifications).
 from __future__ import annotations
 
 import dataclasses
+from typing import Any, Callable
 
 from .method_ctx import HandlerRegistry, bind_module
+from .transport import bind_turn_origin, reset_turn_origin
 
 _registry = HandlerRegistry()
 
@@ -1146,7 +1148,13 @@ def _run_prompt_submit(
     display_metadata: dict | None = None, image_paths: list[str] | None = None,
     queued_prompt_generation: int | None = None,
     terminal_callback: Callable[[dict[str, Any]], None] | None = None,
-    turn_author: dict | None = None, report_ownership_refusal: bool = True) -> bool:
+    turn_author: dict | None = None, report_ownership_refusal: bool = True,
+    origin_transport: Any | None = None) -> bool:
+    # The turn's native-action authority: exactly the socket the admission captured, handed in
+    # explicitly before the worker thread started. Synthesized turns (queued drain, cron, wake-ups,
+    # compute-host children) pass none and therefore fail closed. Never resolved from whatever
+    # transport happens to be ambient in this context (a stdio fallback or a later socket).
+    turn_origin = origin_transport
     # Every dispatch binds the session's own row (session_key, real source) before the turn writes:
     # the synthesized turns that enter here directly (crash auto-continue, queued-prompt drain,
     # wake-ups) bypass prompt.submit's persist, and a row-less turn is otherwise materialized by
@@ -1193,6 +1201,7 @@ def _run_prompt_submit(
         # RPC-dispatcher ContextVars do not follow onto this thread: rebind the transport
         # before any tool can commission a child (delegate_task captures it as authority).
         transport_token = bind_transport(session.get("transport"))
+        origin_token = bind_turn_origin(turn_origin)
         runtime_session_token = _current_runtime_session_record.set(session)
         st = _TurnRun(
             session["agent"], session.pop("one_turn_model_restore", None), terminal_callback,
@@ -1234,6 +1243,7 @@ def _run_prompt_submit(
             try:  # a raising settle step must not skip the trim / HERMES_HOME reset
                 _current_runtime_session_record.reset(runtime_session_token)
                 reset_transport(transport_token)
+                reset_turn_origin(origin_token)
                 # A stale interim closure must not fire during a later turn.
                 st.agent.interim_assistant_callback = None
                 with session["history_lock"]:

@@ -110,8 +110,15 @@ _lock = threading.Lock()
 _open: dict[str, ServerRequest] = {}
 
 
+_LIVE_ONLY_REQUESTS = frozenset({"phone.actions.list", "phone.actions.run"})
+
+
 def can_replay_request(method: str, params: dict) -> bool:
-    """Secure page scripts belong only to the original live request, never a resume."""
+    """Secure page scripts belong only to the original live request, never a resume.
+    Native phone-action requests are live-only too: their frame/params must never enter
+    ``open_requests``, resume snapshots, compute-host replay or diagnostic state."""
+    if method in _LIVE_ONLY_REQUESTS:
+        return False
     return not (method == "preview.act" and params.get("action") == "vault")
 
 # Frame sinks, bound by ``bind_sinks`` from server.py at import time (like the method_ctx split
@@ -119,6 +126,9 @@ def can_replay_request(method: str, params: dict) -> bool:
 # fixtures that patch ``sys.modules`` around the server import.
 _write: Callable[[dict], Any] = lambda frame: None
 _emit: Callable[[str, str, dict], Any] = lambda event, sid, payload: None
+# Builds the canonical ``event`` frame (contract-checked by the server module that owns it) so a
+# socket-pinned cancellation reaches only that socket with the same wire shape ``_emit`` produces.
+_event_frame: Callable[[str, str, dict], dict] | None = None
 # ``answerable(sid)``: False only when every client attached to the session is a build that never
 # advertised handling server→client requests (session_transports.py::_session_client_answers_requests).
 _answerable: Callable[[str], bool] = lambda sid: True
@@ -138,11 +148,14 @@ _answering_clients: set = set()
 
 
 def bind_sinks(write_json: Callable[[dict], Any], emit: Callable[[str, str, dict], Any],
-               answerable: Callable[[str], bool], clients: Callable[[str], list] | None = None) -> None:
-    global _write, _emit, _answerable, _clients
+               answerable: Callable[[str], bool], clients: Callable[[str], list] | None = None,
+               event_frame: Callable[[str, str, dict], dict] | None = None) -> None:
+    global _write, _emit, _answerable, _clients, _event_frame
     _write, _emit, _answerable = write_json, emit, answerable
     if clients is not None:
         _clients = clients
+    if event_frame is not None:
+        _event_frame = event_frame
 
 
 def advertise(transport: Any, server_requests: bool) -> None:
@@ -154,10 +167,63 @@ def advertise(transport: Any, server_requests: bool) -> None:
             _answering_clients.discard(transport)
 
 
+# Transports whose client advertised ``phone_control`` (Conduit app): the phone.* server requests
+# are pinned to these only, so a Desktop window attached to the same session can never settle a
+# phone request with a method-not-found error while the phone is still working. Ordered by the last
+# advertisement: a reinstalled app reconnects while its previous process may still hold a socket, and
+# the newest advertisement is the build the user is actually looking at.
+_phone_transports: dict[Any, float] = {}
+
+
+def advertise_phone(transport: Any, phone_control: bool) -> None:
+    """Record whether *transport*'s client controls the user's phone (``client.capabilities``)."""
+    with _lock:
+        if phone_control:
+            _phone_transports[transport] = time.time()
+        else:
+            _phone_transports.pop(transport, None)
+
+
+def phone_transport() -> Any | None:
+    """The most recently advertising phone-control client (Conduit), or ``None``."""
+    with _lock:
+        if not _phone_transports:
+            return None
+        return max(_phone_transports.items(), key=lambda item: item[1])[0]
+
+
+# Transports that registered native actions v1 (``client.capabilities {phone_actions_version: 1}``).
+# Registration is per-socket: it is NOT a session/global phone pointer, so another phone that
+# connected later can never run an action for a turn it did not submit. Disconnect revokes it.
+_phone_action_transports: dict[Any, int] = {}
+
+
+def advertise_phone_actions(transport: Any, version: Any) -> None:
+    """Record (or clear) *transport*'s native-actions v1 registration. Anything but 1 is no registration."""
+    with _lock:
+        if type(version) is int and version == 1:
+            _phone_action_transports[transport] = 1
+        else:
+            _phone_action_transports.pop(transport, None)
+
+
+def phone_actions_registered(transport: Any) -> bool:
+    """True only for the exact socket that negotiated native actions v1."""
+    if transport is None:
+        return False
+    with _lock:
+        return _phone_action_transports.get(transport) == 1
+
+
 def forget(transport: Any) -> None:
-    """Drop a disconnected transport's advertisement."""
+    """Drop a disconnected transport's advertisement and end its pinned pending requests."""
     with _lock:
         _answering_clients.discard(transport)
+        _phone_transports.pop(transport, None)
+        _phone_action_transports.pop(transport, None)
+    # A pinned native-action request must not outlive its socket: the tool sees None and reports
+    # unknown_outcome (never a retry), and no reconnecting client inherits the card.
+    cancel(None, "disconnect", transport=transport)
 
 
 def answers_requests(transport: Any) -> bool:
@@ -174,12 +240,27 @@ def _unanswerable(method: str, sid: str) -> bool:
 
 
 def _emit_cancel(req: ServerRequest, reason: str) -> None:
-    _emit("request.cancel", req.sid, {"id": req.id, "method": req.method, "reason": reason})
+    payload = {"id": req.id, "method": req.method, "reason": reason}
+    if req.transport is not None and _event_frame is not None:
+        # A request pinned to one socket (native actions) is cancelled on THAT socket only: the
+        # session-wide emit would show the card to every other viewer and cannot be untold.
+        try:
+            req.transport.write(_event_frame("request.cancel", req.sid, payload))
+        except Exception:
+            logger.debug("server request %s: pinned cancel write failed", req.id, exc_info=True)
+        return
+    _emit("request.cancel", req.sid, payload)
 
 
-def _register(req: ServerRequest) -> None:
+def _register(req: ServerRequest, deadline: float | None = None) -> bool:
+    """Publish and write *req*; returns whether the frame reached the transport's writer.
+    ``False`` is the only proof the request was never dispatched (peer already gone). With an
+    absolute *deadline* a transport that supports :meth:`write_bounded` refuses to enqueue after
+    it and reports a still-pending send as dispatched (uncertain), never as unsent."""
     from tui_gateway.contracts import registry as contracts
 
+    if deadline is not None and time.monotonic() >= deadline:
+        return False
     contract = contracts.SERVER_REQUESTS.get(req.method)
     if contract is None:
         raise RuntimeError(f"server request {req.method!r} has no contract in tui_gateway/contracts")
@@ -194,8 +275,17 @@ def _register(req: ServerRequest) -> None:
     with _lock:
         req.writing = True
         _open[req.id] = req
+    delivered = False
     try:
-        (req.transport.write if req.transport is not None else _write)(frame)
+        if req.transport is not None and deadline is not None:
+            bounded = getattr(req.transport, "write_bounded", None)
+            if bounded is not None:
+                # ``None`` = enqueued but still pending: dispatched, outcome uncertain.
+                delivered = bounded(frame, deadline) is not False
+            else:
+                delivered = req.transport.write(frame) is not False
+        else:
+            delivered = (req.transport.write if req.transport is not None else _write)(frame) is not False
     finally:
         with _lock:
             req.writing = False
@@ -203,10 +293,12 @@ def _register(req: ServerRequest) -> None:
     if withdrawn is not None:
         # cancel() landed between publish and write: its request.cancel must follow the frame, not precede it.
         _emit_cancel(req, withdrawn)
+    return delivered
 
 
 def send(method: str, sid: str, params: dict, *, timeout: float | None,
-         qids: list[str] | None = None, transport: Any = None) -> dict | None:
+         qids: list[str] | None = None, transport: Any = None,
+         deadline: float | None = None, dispatch_receipt: list | None = None) -> dict | None:
     """Send one request and block for the response ``result`` (a dict).
 
     Returns ``None`` when the renderer never answered (timeout, cancel, or an error response — e.g.
@@ -216,14 +308,33 @@ def send(method: str, sid: str, params: dict, *, timeout: float | None,
     ``transport`` pins a session-less request to the client socket that asked for it (an RPC handler
     calling back into its own caller's window): the frame goes only there, only its response settles
     it, and any error from it (a decline included) is a refusal.
+
+    ``deadline`` is an absolute ``time.monotonic()`` bound for the WHOLE end-to-end send: an expired
+    deadline never writes (the request is not queued to start later), and the wait is bounded by
+    what remains after dispatch. ``dispatch_receipt`` (a list) receives ``True`` when the frame
+    reached the writer and ``False`` only when it provably did not — the native-action tool uses
+    that to distinguish ``unavailable`` from ``unknown_outcome`` without ever retrying.
     """
+    if deadline is not None and time.monotonic() >= deadline:
+        if dispatch_receipt is not None:
+            dispatch_receipt.append(False)
+        return None
     if transport is None and _unanswerable(method, sid):
+        if dispatch_receipt is not None:
+            dispatch_receipt.append(False)
         return None
     req = ServerRequest(sid, method, params, qids=qids)
     req.transport = transport
-    _register(req)
+    if dispatch_receipt is not None:
+        dispatch_receipt.append(_register(req, deadline))
+    else:
+        _register(req, deadline)
+    wait_for = timeout
+    if deadline is not None:
+        remaining = max(0.0, deadline - time.monotonic())
+        wait_for = remaining if timeout is None else min(timeout, remaining)
     try:
-        req.event.wait(timeout)
+        req.event.wait(wait_for)
     except BaseException:
         # The wait itself died (KeyboardInterrupt, SystemExit, injected error): withdraw the request
         # or it stays in _open forever — replayed to every reconnecting client and reported by
@@ -337,8 +448,13 @@ def resolve_response(frame: dict, transport: Any = None) -> bool:
             req.answered = True
     if "error" in frame:
         error = frame["error"] if isinstance(frame["error"], dict) else {}
-        logger.warning("server request %s (%s) answered with error %s: %s",
-                       rid, req.method, error.get("code"), error.get("message"))
+        if req.method in _LIVE_ONLY_REQUESTS:
+            # No client-supplied error text in diagnostics, even at debug level.
+            logger.warning("server request %s (%s) answered with error code %s",
+                           rid, req.method, error.get("code"))
+        else:
+            logger.warning("server request %s (%s) answered with error %s: %s",
+                           rid, req.method, error.get("code"), error.get("message"))
     if req.on_result is not None:
         req.on_result(req.result)
     req.event.set()
@@ -365,14 +481,17 @@ def lock_answer(request_id: str, question_id: str, answer: str | None) -> list[s
     return remaining
 
 
-def cancel(sid: str | None = None, reason: str = "interrupted", *, method: str | None = None) -> int:
+def cancel(sid: str | None = None, reason: str = "interrupted", *, method: str | None = None,
+           transport: Any = None) -> int:
     """Withdraw open requests — only *sid*'s (session.interrupt must not touch other sessions'), or
-    every one when *sid* is None (shutdown); *method* narrows it to one request kind. Blocked waits
+    every one when *sid* is None (shutdown); *method* narrows it to one request kind and *transport*
+    to requests pinned to one client socket (disconnect). Blocked waits
     return None (a batch returns its locked answers with ``outcome: cancelled``); queue-backed requests
     run ``on_result(None)`` so their owner can settle. Returns the number withdrawn."""
     with _lock:
         targets = [req for req in _open.values()
-                   if (sid is None or req.sid == sid) and (method is None or req.method == method)]
+                   if (sid is None or req.sid == sid) and (method is None or req.method == method)
+                   and (transport is None or req.transport is transport)]
         for req in targets:
             _open.pop(req.id, None)
             if req.qids is not None:
@@ -434,3 +553,5 @@ def reset_for_tests() -> None:
     with _lock:
         _open.clear()
         _answering_clients.clear()
+        _phone_transports.clear()
+        _phone_action_transports.clear()

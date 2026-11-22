@@ -84,6 +84,9 @@ def sent_server_requests() -> set[str]:
     names: set[str] = set()
     for src in (REPO / current_path("tui_gateway")).glob("*.py"):
         names.update(_LITERAL_REQUEST.findall(_read(src)))
+    # Conduit tools are the actual emitters of both legacy and versioned phone requests.
+    phone_code = _read(REPO / current_path("tools") / "phone_control.py")
+    names.update(re.findall(r'\b(?:_send|_actions_request)\(\s*"(phone\.[a-z_.]+)"', phone_code))
     return names
 
 
